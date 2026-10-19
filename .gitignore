@@ -1,0 +1,40 @@
+# secrets / credentials
+.env
+.env.*
+*.key
+*.pem
+*_ed25519
+*_rsa
+credentials/
+secrets/
+
+# logs & runtime state
+*.log
+logs/
+state.json
+*.flag
+*.pid
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# game / generated media
+*.mp4
+*.gif
+*.png
+*.jpg
+*.dem
+*.gma
+*.bsp
+*.nav
+output/
+tmp/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
