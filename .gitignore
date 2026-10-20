@@ -33,6 +33,11 @@ venv/
 *.nav
 output/
 tmp/
+greg_recorder/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+recorder_health.json
 
 # os / editor
 .DS_Store
