@@ -53,10 +53,21 @@ unique events (a later pin can restore an earlier dropped observation).
 
 Critical preference cannot guarantee zero loss. Health exposes queue/inflight,
 admission/commit/drop/error counts, last durable ingest cursor/time, and storage
-size. A health file is refreshed at most once per two seconds; its timestamp
+size and quarantined identity conflicts. A health file is refreshed at most once per two seconds; its timestamp
 must be checked. SQLite/file errors degrade the recorder and emit fixed error
 categories, not payloads. Writer retries are bounded-memory, fixed 500 ms
 backoff; control producers never wait for DB I/O.
+
+Identity conflicts are **not** storage faults: the original committed event is
+never overwritten. A different envelope with the same event ID, or a different
+ID reusing a source sequence, is rejected in the writer transaction. A
+`recorder.loss` event with `mode=quarantine` retains only IDs, sequence, reason
+and the rejected sanitized envelope's SHA-256, not its payload. Healthy peers
+commit in the same transaction. `quarantined`, `dropped` and categorized losses
+advance only after COMMIT; failed transactions retry without double-counting.
+`mode=cumulative` loss events are counter snapshots, not additional loss deltas.
+Exact byte-identical replay remains idempotent. Transient storage faults still
+retry; deterministic identity violations cannot poison that retry batch.
 
 The writer alone uses WAL + FULL synchronous mode and performs retention/
 checkpointing. Read-only connections use short snapshot transactions and close
@@ -80,7 +91,23 @@ an explicitly linked new recording segment. Unsupported primitive outcomes stay
 unknown; game chat submission is not confirmed audible Discord playback.
 
 On restart, committed open prior runs/experiences become unknown/unclean_restart;
-previous terminal records remain unchanged. No old command or task is resumed.
+previous terminal records remain unchanged. Each affected correlation receives
+`outcome.evaluated` + `experience.closed`, linked to its last recorded event.
+Those events belong to the **original logical run/session** for export/retention,
+with the recovering process's source-instance ID, UTC/monotonic clock and source
+sequence. Never compare monotonic clocks across source instances. An orderly
+writer shutdown also closes residual correlations this way. Startup recovery,
+projections and run closure are one transaction; a failed recovery commit leaves
+the old run open for the next attempt. No old command or task is resumed.
+
+Legacy goal selection is a decision-only experience: accepted/rejected/empty
+choices finalize immediately, with accepted choices linked to a native goal alias
+and `world_outcome=not_applicable`, **not** a successful executed goal. Primitive
+legacy gameplay still has dispatch-only outcome coverage. Vision acquisition is
+a sensor child under the parent inspect correlation; its result/error closes that
+inspection without changing the active navigation/action trace. No new independent
+sensor gameplay decision is fabricated. `model.request` carries model/settings;
+`decision.requested` is emitted once per policy decision.
 Graceful recorder shutdown drains for up to two seconds; pending loss on an
 abrupt crash may be unknowable. Do not present queued events as committed.
 
@@ -105,6 +132,13 @@ unresolved evidence are labeled; `trace_complete` is independent of world
 success. Existing `greg_model_audit.jsonl`, chat/P0/world memory files are not
 imported, deleted, or made public by this feature.
 
+**Canary privacy prerequisite:** the pre-existing `greg_model_audit.jsonl` writes
+raw model-visible content independently of `--recorder-text`. Metadata mode only
+covers the new recorder; it does **not** make all existing logs metadata-only.
+Its disablement/retention/access policy must be agreed before a live canary.
+Exclude legacy audit/chat/memory files from shared bundles. This patch changes
+neither that sink nor its production configuration.
+
 ## Read-only review commands
 
 ```bash
@@ -124,6 +158,16 @@ its extra `ingest_sequence` is transport metadata, not part of the canonical
 envelope's identity. Future mirror ingestion must strip/retain that separately
 and reject conflicting IDs; no mirror/import server is included. `show` reports
 missing parent/evidence refs and coverage, including incomplete recorded success.
+`terminal_resolved` reports whether the terminal ID exists in the returned trace;
+`missing_stages` and `exact_dispatch_recorded` explain why the **observed game
+action chain** is incomplete. Speech, status, goal-selection and sensor-only
+experiences need not contain controller feedback; a closed record is not thereby
+a complete game-action chain. A crash before dispatch remains incomplete, even
+with a correctly linked terminal event. Legacy v1 run-level terminal IDs are
+resolved read-only without rewriting old events or inventing missing closures.
+Readers hide a run marked `retention_expiring` for the whole deletion interval.
+Failed export/backup removes its newly reserved partial output; existing files
+are never overwritten or removed.
 CLI exit codes: 0 query success, 2 usage, 3 unavailable/busy/output failure,
 4 unsupported/corrupt data, 5 not found/expired. Unknown outcome is valid data.
 
@@ -131,8 +175,14 @@ CLI exit codes: 0 query success, 2 usage, 3 unavailable/busy/output failure,
 
 1. Canonical envelope JSON plus indexed keys replaces duplicated DDL payload/
    control columns; a schema marker adds protection against unrelated SQLite DBs.
-2. Startup records baseline commit + complete Python source hashes; actual build
-   commit is **unknown**, not inferred from a branch or hard-coded final SHA.
+2. Startup records a **review baseline reference**, Python source hashes and
+   locally accessible Lua-tree hashes (bounded at 32, with truncation flagged).
+   The resolved model ID, Python/SQLite versions are already recorded. Actual
+   build commit is **unknown**, not inferred from the branch/baseline. A tree
+   snapshot does not attest to installed addon copies, launchers or bundle hash.
+   Before an authorized Windows canary, stage a separately hashed deployment
+   manifest against those actual files/commit. Do not capture raw launcher args
+   or full paths indiscriminately: they can contain credentials/private identity.
 3. Queue commits wake promptly rather than a strict timed batch scheduler;
    writer retry uses a simple 500 ms backoff, not escalating intervals.
 4. Optional CPU/GPU/process/RTT monitoring, full prompt reconstruction, media,
@@ -160,4 +210,8 @@ restart, ACL change or network remediation is implied.
 SEC-PENDING-01: prior unauthenticated LM Studio model-list exposure remains an
 owner task. No ports/authentication/firewalls/tunnels/services were changed.
 Deployment, recorder enablement and any target runtime upgrade require separate
-Connor approval.
+Connor approval. Windows prerequisites remain unverified: local unsynced volume,
+real `msvcrt` locking/reader URI behavior, supported SQLite WAL fix/backport,
+WAL/FULL settings, supervised kill/restart and measured gameplay cadence. Do not
+upgrade Python, touch logs/services, or start that canary under this patch's
+coding-only authorization.

@@ -16,7 +16,7 @@ import uuid
 SCHEMA_VERSION = 1
 EVENT_TYPES = frozenset('''run.started run.heartbeat run.ended run.recovered
 observation.accepted telemetry.gap telemetry.resumed telemetry.sequence_gap
-decision.requested decision.response decision.parsed decision.applied decision.discarded decision.error
+decision.requested model.request decision.response decision.parsed decision.applied decision.discarded decision.error
 sensor.requested sensor.result sensor.error goal.observed route.observed
 action.requested action.dispatch action.write_failed action.suppressed controller.feedback
 outcome.evaluated experience.closed recorder.loss recorder.degraded recorder.recovered retention.expired'''.split())
@@ -28,7 +28,8 @@ provider finish_reason parse_status write_status write_method mode native_route_
 command_session dispatch_id controller_version traversal evaluator closure_reason world_outcome verdict
 coverage continuation_of related_to interaction bridgeSession map_name actor_id build_commit base_commit python_version
 sqlite_version error_category record_state relation to_id to_kind observation_id pre_observation_id
-goal_id action_id decision_id correlation_id source_instance_id version native_status label'''.split())
+goal_id action_id decision_id correlation_id source_instance_id version native_status label
+rejected_event_id existing_event_id rejected_digest'''.split())
 _NUMBERS = frozenset('''x y z radius duration lease hold taps yaw pitch turn throttle steer zoom t seq
 serverTime controlEpoch control_epoch intent_version command_sequence expires retries latency_ms queue_ms
 max_tokens temperature timeout captured_at age_seconds event cursor ttl set_at distance speed dwell_seconds
@@ -203,7 +204,7 @@ def validate_event(value):
     for k in ('correlation_id', 'decision_id', 'goal_id', 'action_id', 'causation_id'):
         if value.get(k) is not None: uuid.UUID(value[k])
     for ref in value['observation_ids']: uuid.UUID(ref)
-    if isinstance(value['source_sequence'], bool) or not isinstance(value['source_sequence'], int) or value['source_sequence'] < 1:
+    if type(value['source_sequence']) is not int or not 1 <= value['source_sequence'] <= 2**63-1:
         raise ValueError('invalid sequence')
     if type(value['monotonic_ns']) is not int or value['monotonic_ns'] < 0:
         raise ValueError('invalid monotonic clock')
@@ -230,7 +231,8 @@ def run_traced(trace, sink, fn, /, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception as exc:
-        observed('decision.error', {'error_category': type(exc).__name__}, priority='critical')
+        observed('sensor.error' if getattr(trace, 'lane', None) == 'vision' else 'decision.error',
+                 {'error_category': type(exc).__name__}, priority='critical')
         raise
     finally:
         _SCOPE.reset(token)

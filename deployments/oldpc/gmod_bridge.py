@@ -1275,9 +1275,13 @@ def inspect(helper: str, state: dict, reason: str) -> dict:
 def source_manifest():
     import hashlib
     root = Path(__file__).resolve().parent
-    files = [{'id':p.name, 'version':hashlib.sha256(p.read_bytes()).hexdigest()}
-             for p in sorted(root.glob('*.py'))]
-    return {'files':files[:32], 'build_commit':'unknown', 'base_commit':'194ed3d2841a72ed1c2915f32d470f09d7f352a9'}
+    # Hash only files actually accessible here; this does NOT attest to installed
+    # addon copies, launcher arguments or a deployed Git commit.
+    paths = sorted(root.glob('*.py')) + sorted((root / 'lua').rglob('*.lua'))
+    files = [{'id':p.relative_to(root).as_posix(), 'version':hashlib.sha256(p.read_bytes()).hexdigest()}
+             for p in paths]
+    return {'files':files[:32], 'truncated':len(files)>32, 'coverage':'collector_tree_snapshot',
+            'build_commit':'unknown', 'base_commit':'194ed3d2841a72ed1c2915f32d470f09d7f352a9'}
 
 
 def main() -> int:
@@ -1392,11 +1396,11 @@ def main() -> int:
     # One bounded worker: slow model/vision never blocks state/chat/reflex servicing.
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="greg-policy")
     threading.Thread(target=watchdog, name="greg-watchdog", daemon=True).start()
-    def submit_policy(kind, fn, *args):
+    def submit_policy(kind, fn, *args, parent_trace=None):
         nonlocal pending_trace
         if tracker is None:
             return worker.submit(fn, *args)
-        pending_trace = tracker.begin_decision(lane=kind, template_version=kind + '.v1')
+        pending_trace = tracker.begin_sensor(parent_trace) if kind == 'vision' else tracker.begin_decision(lane=kind, template_version=kind + '.v1')
         return worker.submit(run_traced, pending_trace, recorder, fn, *args)
     pending_trace = ready_trace = None
     log(f"watching {greg} (model={model}, target={target or 'first fresh player'})")
@@ -1539,16 +1543,19 @@ def main() -> int:
                         if pending_kind == "vision":
                             vision = result
                             if tracker is not None:
-                                recorder.record('sensor.result', {'caption':result.get('caption'), 'captured_at':result.get('t')}, trace=pending_trace)
-                                tracker.decision_result(pending_trace, accepted=True, reason='sensor_ready')
+                                tracker.sensor_result(pending_trace, accepted=True, reason='sensor_ready', result=result)
                         elif pending_kind == "goal":
                             g = result if isinstance(result, str) else ""
-                            if g.strip() and intent.goals.start(g, "self", latest, now):
+                            goal_started = bool(g.strip() and intent.goals.start(g, "self", latest, now))
+                            if goal_started:
                                 intent.self_goal = g
                                 log("new self_goal=%r" % g)
                             else:
                                 log("goal pick empty; keeping %r" % intent.self_goal)
                             intent.self_at = now
+                            if tracker is not None:
+                                tracker.goal_selection(pending_trace, accepted=goal_started, goal=g,
+                                                       native_goal=intent.goals.active if goal_started else None)
                         # An agenda choice is semantic, not a stale movement command.
                         # Agenda.accept revalidates map/session/epoch and live catalog
                         # IDs; local navigation plans from the CURRENT state. Keep
@@ -1559,12 +1566,14 @@ def main() -> int:
                     if tracker is not None and pending_trace is not None:
                         age_limit = max(10, a.model_timeout) if pending_kind == 'agenda' else 10
                         if not valid or pending_context != context or (pending_kind not in {'vision','goal'} and now-pending_at > age_limit):
-                            tracker.decision_result(pending_trace, accepted=False, reason='stale_or_context')
+                            if pending_kind == 'vision': tracker.sensor_result(pending_trace, accepted=False, reason='stale_or_context')
+                            else: tracker.decision_result(pending_trace, accepted=False, reason='stale_or_context')
                 except Exception as exc:
                     if PLAYERCORE is not None: PLAYERCORE.needs_brain = True
                     log(f"{pending_kind} unavailable: {exc}; API fallback remains live")
                     if tracker is not None and pending_trace is not None:
-                        tracker.decision_result(pending_trace, accepted=False, reason='inference_error')
+                        if pending_kind == 'vision': tracker.sensor_result(pending_trace, accepted=False, reason='inference_error')
+                        else: tracker.decision_result(pending_trace, accepted=False, reason='inference_error')
                 future = None
                 pending_trace = None
                 request_due = now + 1
@@ -1592,14 +1601,17 @@ def main() -> int:
             if isinstance(tool, dict) and tool.get("action") == "inspect":
                 ready = tool
             if ready and ready.get("action") == "inspect":
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_inspect',activate=False)
+                sensor_started = False
                 if future is None and now >= vision_due and a.vision_helper:
                     reason = str(ready.get("reason", "describe appearance"))[:240]
-                    future = submit_policy("vision", inspect, a.vision_helper, dict(latest), reason)
+                    future = submit_policy("vision", inspect, a.vision_helper, dict(latest), reason, parent_trace=ready_trace)
                     pending_context, pending_at, pending_kind = context, now, "vision"
                     vision_due = now + 10
-                if tracker is not None and ready_trace is not None:
-                    tracker.decision_result(ready_trace,accepted=True,reason='collector_inspect')
-                    tracker.close(ready_trace.correlation_id,'inspection_requested')
+                    sensor_started = True
+                if tracker is not None and ready_trace is not None and not sensor_started:
+                    tracker.close(ready_trace.correlation_id,'sensor_not_started')
                 ready_trace = None
                 ready = None  # never send a collector tool to Lua
             cand = ready if isinstance(ready, dict) else None
@@ -1610,7 +1622,7 @@ def main() -> int:
                 record_lesson(cand, latest)
                 log("lesson stored: " + str(cand.get("text", ""))[:140])
                 if tracker is not None and ready_trace is not None:
-                    tracker.decision_result(ready_trace,accepted=True,reason='collector_note')
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_note',activate=False)
                     tracker.close(ready_trace.correlation_id,'note_recorded')
                 ready_trace = None
                 ready = None

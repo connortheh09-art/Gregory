@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 import json
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -17,7 +18,7 @@ import sqlite3
 import threading
 import time
 
-from greg_events import EventFactory, Event, new_id, utc, validate_event, sanitize
+from greg_events import EventFactory, Event, TraceContext, ControlContext, new_id, utc, validate_event, sanitize
 
 DDL = '''
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -41,6 +42,13 @@ CREATE TABLE experiences(correlation_id TEXT PRIMARY KEY,run_id TEXT NOT NULL RE
  projection_version INTEGER NOT NULL,summary_json TEXT NOT NULL);
 CREATE INDEX experiences_run ON experiences(run_id,correlation_id);
 '''
+
+
+class EventConflict(ValueError):
+    """Deterministic identity violation, not a retriable storage failure."""
+    def __init__(self, reason, existing_id):
+        super().__init__(reason)
+        self.reason, self.existing_id = reason, existing_id
 
 
 class NullRecorder:
@@ -95,7 +103,7 @@ class Recorder:
         self._closing = False
         self._budget_halted = False
         self._decision_parents = {}
-        self._stats = dict(status='starting', admitted=0, committed=0, dropped=0, invalid=0,
+        self._stats = dict(status='starting', admitted=0, committed=0, dropped=0, invalid=0, quarantined=0,
                            inflight=0, errors=0, last_error=None, last_ingest_sequence=0,
                            last_commit_utc=None, losses={}, started_at_utc=utc())
         self._ready = threading.Event()
@@ -193,8 +201,12 @@ class Recorder:
         v = event.as_dict()
         old = db.execute('SELECT envelope_json FROM events WHERE event_id=?', (v['event_id'],)).fetchone()
         if old:
-            if old[0] != event.encoded: raise ValueError('conflicting duplicate event')
+            if old[0] != event.encoded: raise EventConflict('event_id_conflict', v['event_id'])
             return False
+        old_sequence = db.execute('''SELECT event_id FROM events
+            WHERE source_instance_id=? AND source=? AND source_sequence=?''',
+            (v['source_instance_id'], v['source'], v['source_sequence'])).fetchone()
+        if old_sequence: raise EventConflict('source_sequence_conflict', old_sequence[0])
         db.execute('''INSERT INTO events(event_id,schema_version,run_id,source,source_instance_id,source_sequence,
                     event_type,received_at_utc,correlation_id,action_id,envelope_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
                    (v['event_id'], 1, v['run_id'], v['source'], v['source_instance_id'], v['source_sequence'],
@@ -221,26 +233,69 @@ class Recorder:
         if v['event_type'] == 'run.ended':
             db.execute('UPDATE runs SET ended_at_utc=?,end_reason=? WHERE run_id=?',
                        (v['received_at_utc'], 'orderly', v['run_id']))
-            db.execute("UPDATE experiences SET record_state='closed',closure_reason='orderly_shutdown',world_outcome='unknown',verdict='inconclusive',terminal_event_id=? WHERE run_id=? AND record_state='open'",
-                       (v['event_id'],v['run_id']))
         return True
+
+    def _owned_event(self, kind, payload, run_id, session_id, *, trace=None):
+        """Recovery belongs to the old logical run, but has this process's source ID/clock.
+
+        Keep closures in that run's export/retention graph. Never reuse the crashed
+        process's source sequence or pretend that it emitted the recovery events.
+        """
+        value = self.factory.make(kind, payload, trace=trace).as_dict()
+        value.update(run_id=run_id, session_id=session_id)
+        return validate_event(value)
+
+    def _close_open_experiences(self, db, run_id, session_id, reason):
+        count = 0
+        for cid, in db.execute("SELECT correlation_id FROM experiences WHERE run_id=? AND record_state='open'",
+                               (run_id,)).fetchall():
+            previous = json.loads(db.execute('''SELECT envelope_json FROM events
+                WHERE correlation_id=? ORDER BY ingest_sequence DESC LIMIT 1''', (cid,)).fetchone()[0])
+            trace = TraceContext(self.run_id, cid, decision_id=previous['decision_id'],
+                goal_id=previous['goal_id'], action_id=previous['action_id'],
+                control=ControlContext(**previous['control']), causation_id=previous['event_id'])
+            payload = {'closure_reason':reason, 'world_outcome':'unknown', 'verdict':'inconclusive'}
+            outcome = self._owned_event('outcome.evaluated', dict(payload, evaluator='recorder.lifecycle.v1'),
+                                       run_id, session_id, trace=trace)
+            count += self._insert(db, outcome)
+            closed = self._owned_event('experience.closed', payload, run_id, session_id,
+                                      trace=replace(trace, causation_id=outcome.as_dict()['event_id']))
+            count += self._insert(db, closed)
+        return count
 
     def _transaction(self, db, batch, *, startup=False):
         db.execute('BEGIN IMMEDIATE')
-        count = 0
+        count, quarantined = 0, []
         try:
             if startup:
                 db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?)',
                            (self.run_id, self.session_id, utc(), None, None,
                             json.dumps(self._build), json.dumps({'navigation': self._coverage=='playercore_navigation', 'voice': False, 'media': False})))
-                # Recovery events belong to the new process; old outcomes remain unknown.
-                old_runs = [r[0] for r in db.execute('SELECT run_id FROM runs WHERE ended_at_utc IS NULL AND run_id<>?', (self.run_id,))]
-                for old in old_runs:
-                    recovery = self.factory.make('run.recovered', {'reason': 'unclean_restart'})
+                old_runs = db.execute('SELECT run_id,session_id FROM runs WHERE ended_at_utc IS NULL AND run_id<>?', (self.run_id,)).fetchall()
+                for old, session in old_runs:
+                    recovery = self._owned_event('run.recovered', {'reason': 'unclean_restart'}, old, session)
                     count += self._insert(db, recovery)
-                    db.execute("UPDATE experiences SET record_state='closed',closure_reason='unclean_restart',world_outcome='unknown',verdict='inconclusive',terminal_event_id=? WHERE run_id=? AND record_state='open'", (recovery.as_dict()['event_id'], old))
+                    count += self._close_open_experiences(db, old, session, 'unclean_restart')
                     db.execute("UPDATE runs SET ended_at_utc=?,end_reason='unclean_restart' WHERE run_id=?", (utc(), old))
-            for event in batch: count += self._insert(db, event)
+            for event in batch:
+                try:
+                    count += self._insert(db, event)
+                except EventConflict as conflict:
+                    # Metadata-only dead letter, atomically committed with healthy peers.
+                    # No raw rejected payload, exception text, overwrite or infinite retry.
+                    value = event.as_dict()
+                    payload = {'reason':conflict.reason, 'mode':'quarantine', 'count':1,
+                        'rejected_event_id':value['event_id'], 'existing_event_id':conflict.existing_id,
+                        'rejected_digest':hashlib.sha256(event.encoded.encode()).hexdigest(),
+                        'first_sequence':value['source_sequence'], 'last_sequence':value['source_sequence']}
+                    marker = self.factory.make('recorder.loss', payload,
+                        trace=TraceContext(self.run_id, value['correlation_id']))
+                    count += self._insert(db, marker)
+                    quarantined.append(payload)
+                    continue
+                value = event.as_dict()
+                if value['event_type'] == 'run.ended':
+                    count += self._close_open_experiences(db, value['run_id'], value['session_id'], 'orderly_shutdown')
             cursor = db.execute('SELECT COALESCE(MAX(ingest_sequence),0) FROM events').fetchone()[0]
             db.commit()
         except Exception:
@@ -250,6 +305,12 @@ class Recorder:
             self._stats['committed'] += count
             self._stats['last_ingest_sequence'] = cursor
             self._stats['last_commit_utc'] = utc()
+            # Only durable quarantines count; a rolled-back transaction reports no loss.
+            for item in quarantined:
+                self._stats['quarantined'] += 1; self._stats['dropped'] += 1
+                row = self._stats['losses'].setdefault(item['reason'],
+                    {'count':0, 'first_sequence':item['first_sequence'], 'last_sequence':item['last_sequence']})
+                row['count'] += 1; row['last_sequence'] = item['last_sequence']
 
     def _maintenance(self, db):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self.retention_days)).isoformat().replace('+00:00','Z')
@@ -324,7 +385,7 @@ class Recorder:
                         loss = self.health()['dropped']
                         if loss != reported_loss:
                             losses=[dict(row,reason=reason) for reason,row in self.health()['losses'].items()]
-                            event = self.factory.make('recorder.loss', {'count': loss, 'losses': losses})
+                            event = self.factory.make('recorder.loss', {'mode':'cumulative', 'count': loss, 'losses': losses})
                             self._transaction(db,[event]); reported_loss = loss
                         with self._cv:
                             self._stats['status'] = 'budget_halted' if self._budget_halted else 'ready'
@@ -421,6 +482,12 @@ def get_experience(db, correlation_id):
     if row is None: return None
     events = [json.loads(r[0]) for r in db.execute('''SELECT envelope_json FROM events WHERE correlation_id=? OR event_id IN
                 (SELECT from_event_id FROM links WHERE to_id=? AND to_kind='correlation') ORDER BY ingest_sequence''', (correlation_id,correlation_id))]
+    # Older v1 databases used a run-level terminal outside the correlation. Show
+    # that evidence too, without rewriting history or claiming a complete action.
+    terminal_id = row['terminal_event_id']
+    if terminal_id and not any(e['event_id'] == terminal_id for e in events):
+        terminal = db.execute('SELECT envelope_json FROM events WHERE event_id=?', (terminal_id,)).fetchone()
+        if terminal: events.append(json.loads(terminal[0]))
     refs = {ref for event in events for ref in event['observation_ids']}
     refs.update(e['causation_id'] for e in events if e['causation_id'])
     evidence, missing = [], []
@@ -433,22 +500,53 @@ def get_experience(db, correlation_id):
     kinds = {e['event_type'] for e in primary}
     has_exact_action = any(e['event_type']=='action.dispatch' and e['payload'].get('parameters_complete') for e in primary)
     model_origin=any(e['event_type']=='decision.requested' and e['payload'].get('origin')=='model' for e in primary)
-    result['trace_complete'] = not missing and has_exact_action and (not model_origin or 'decision.response' in kinds) and {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'} <= kinds
+    required = {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'}
+    if model_origin: required.add('decision.response')
+    result['terminal_resolved'] = bool(terminal_id and any(e['event_id']==terminal_id for e in events))
+    result['missing_stages'] = sorted(required - kinds)
+    result['trace_complete_scope'] = 'observed_game_action_chain'
+    result['exact_dispatch_recorded'] = has_exact_action
+    result['trace_complete'] = not missing and has_exact_action and result['terminal_resolved'] and not result['missing_stages']
     return result
+
+
+def export_run(db, run_id, output, *, max_bytes=64*1024*1024):
+    """Sanitized canonical events plus local cursor; remove partial failed outputs."""
+    path = Path(output)
+    # Reserve outside cleanup: a preexisting destination must never be removed.
+    handle = path.open('x', encoding='utf8')
+    total = 0
+    try:
+        with handle:
+            rows = db.execute('SELECT ingest_sequence,envelope_json FROM events WHERE run_id=? ORDER BY ingest_sequence', (run_id,))
+            for row in rows:
+                value = json.loads(row['envelope_json']); value['ingest_sequence'] = row['ingest_sequence']
+                line = json.dumps(value, ensure_ascii=True) + '\n'
+                total += len(line.encode('utf8'))
+                if total > max_bytes: raise ValueError('export exceeds byte limit')
+                handle.write(line)
+    except BaseException:
+        try: path.unlink()
+        except OSError: pass
+        raise
+    return total
 
 
 def backup(db, output, *, deadline_seconds=5):
     path = Path(output)
     # Reserve destination exclusively; never overwrite a user file.
     with path.open('xb'): pass
-    target = sqlite3.connect(path)
+    target = None
     started = time.monotonic()
     def progress(*_):
         if time.monotonic()-started > deadline_seconds: raise TimeoutError('backup deadline')
-    try: db.backup(target, pages=64, progress=progress, sleep=.01)
+    try:
+        target = sqlite3.connect(path)
+        db.backup(target, pages=64, progress=progress, sleep=.01)
     except Exception:
-        target.close()
+        if target is not None: target.close(); target = None
         try: path.unlink()
         except OSError: pass
         raise
-    finally: target.close()
+    finally:
+        if target is not None: target.close()

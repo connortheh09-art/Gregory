@@ -127,15 +127,45 @@ class ExperienceTracker:
             episode['trace'] = trace
         return trace
 
-    def decision_result(self, trace, *, accepted, reason, parsed_summary=None):
+    def decision_result(self, trace, *, accepted, reason, parsed_summary=None, activate=True):
         self._emit('decision.applied' if accepted else 'decision.discarded',
                    {'accepted':accepted,'reason':reason,'parsed':parsed_summary or {}},trace=trace)
         if not accepted: self.close(trace.correlation_id,reason)
-        elif trace.lane != 'social':
+        elif activate and trace.lane not in {'social','vision','goal'}:
             episode=self.episodes.get(trace.correlation_id)
             if episode and episode['trace'].goal_id:
                 trace=replace(trace,goal_id=episode['trace'].goal_id)
             self.active_trace = trace
+
+    def goal_selection(self, trace, *, accepted, goal, native_goal=None):
+        """Finalize a legacy goal *selection*, never imply execution/arrival."""
+        reason = 'goal_selected' if accepted else 'goal_empty_or_rejected'
+        if accepted:
+            trace = replace(trace, goal_id=new_id())
+            episode = self.episodes.get(trace.correlation_id)
+            if episode: episode['trace'] = trace
+        self.decision_result(trace, accepted=accepted, reason=reason,
+                             parsed_summary={'native_text':goal}, activate=False)
+        if accepted:
+            self._emit('goal.observed', {'native_goal_id':(native_goal or {}).get('id'),
+                       'native_status':'started', 'native_text':goal}, trace=trace)
+            self.close(trace.correlation_id, reason, 'not_applicable')
+
+    def begin_sensor(self, parent):
+        # Evidence acquisition is a child of inspect, not a new gameplay decision.
+        if parent is None:
+            parent = TraceContext(self.run_id, new_id(), control=self.current_control)
+            self._new_episode(parent, self.mono())
+        trace = replace(parent, lane='vision')
+        requested = self._emit('sensor.requested', {'kind':'vision'}, trace=trace)
+        return replace(trace, causation_id=requested.as_dict()['event_id']) if requested else trace
+
+    def sensor_result(self, trace, *, accepted, reason, result=None):
+        result = result or {}
+        self._emit('sensor.result' if accepted else 'sensor.error',
+                   {'reason':reason, 'accepted':accepted, 'caption':result.get('caption'),
+                    'captured_at':result.get('t')}, trace=trace)
+        self.close(trace.correlation_id, 'inspection_observed' if accepted else reason)
 
     def directive(self, version):
         if self.active_trace:

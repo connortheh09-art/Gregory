@@ -10,7 +10,7 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deployments' / 'oldpc'))
-from greg_recorder import open_reader, read_events, get_experience, backup
+from greg_recorder import open_reader, read_events, get_experience, backup, export_run
 
 
 def main(argv=None):
@@ -61,14 +61,7 @@ def main(argv=None):
             else:
                 # Export a bounded snapshot, with stable IDs and cursor in every row.
                 if not db.execute("SELECT 1 FROM runs WHERE run_id=? AND COALESCE(end_reason,'')<>'retention_expiring'",(args.run,)).fetchone(): return 5
-                rows=db.execute('SELECT ingest_sequence,envelope_json FROM events WHERE run_id=? ORDER BY ingest_sequence',(args.run,))
-                total=0
-                with Path(args.output).open('x',encoding='utf8') as output:
-                    for row in rows:
-                        total+=len(row['envelope_json'])
-                        if total>64*1024*1024: raise ValueError('export exceeds 64 MiB; select a smaller session')
-                        value=json.loads(row['envelope_json']);value['ingest_sequence']=row['ingest_sequence']
-                        output.write(json.dumps(value,ensure_ascii=True)+'\n')
+                total=export_run(db,args.run,args.output)
                 result={'exported_bytes':total,'retention':'Exports require separate deletion.'}
             print(json.dumps(result,ensure_ascii=True,indent=2))
         return 0

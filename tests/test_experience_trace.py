@@ -58,6 +58,8 @@ class Trace(unittest.TestCase):
         dispatch=next(e for e in result['events'] if e['event_type']=='action.dispatch')
         self.assertEqual(dispatch['payload']['action'],command['action'])
         self.assertEqual(result['unresolved_refs'],[])
+        self.assertEqual(sum(e['event_type']=='decision.requested' for e in result['events']),1)
+        self.assertIn('model.request',{e['event_type'] for e in result['events']})
         self.assertNotIn('private-steam-id',json.dumps(result))
 
     def test_five_minute_old_success_survives_recorder_restart(self):

@@ -39,7 +39,7 @@ def post_chat(url, *, json, timeout=8):
     if _current_trace() is None:
         return requests.post(url, json=body, timeout=max(timeout, _timeout))
     started = time.monotonic()
-    _observed('decision.requested', {'model': body.get('model'), 'settings': {
+    _observed('model.request', {'model': body.get('model'), 'settings': {
         k: body[k] for k in ('max_tokens', 'temperature') if k in body}})
     try:
         response = requests.post(url, json=body, timeout=max(timeout, _timeout))

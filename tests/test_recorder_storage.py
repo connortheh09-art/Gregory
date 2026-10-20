@@ -93,12 +93,12 @@ class Storage(unittest.TestCase):
 
     def test_conflicting_duplicate_is_not_overwritten(self):
         r=self.recorder();e=r.factory.make('run.heartbeat',{'count':1});r.emit(e)
-        # One batch writes original then conflicts: entire batch is rolled back.
+        # Conflicting payload is quarantined, never allowed to replace the original.
         v=e.as_dict();v['payload']['count']=2;r.emit(Event(json.dumps(v,separators=(',',':'))))
         r.close()
         with open_reader(self.path) as db:
             rows=[v for v in read_events(db)['events'] if v['event_id']==e.as_dict()['event_id']]
-            self.assertTrue(not rows or rows[0]['payload']['count']==1)
+            self.assertEqual(len(rows),1);self.assertEqual(rows[0]['payload']['count'],1)
 
     def test_actual_process_exit_after_commit_is_recovered_unknown(self):
         module_path=str(Path(__file__).resolve().parents[1]/'deployments'/'oldpc')
@@ -125,6 +125,15 @@ os._exit(0)
             result=get_experience(db,cid)
             self.assertEqual(result['world_outcome'],'unknown')
             self.assertEqual(result['closure_reason'],'unclean_restart')
+            self.assertTrue(result['terminal_resolved'])
+            terminal=next(e for e in result['events'] if e['event_id']==result['terminal_event_id'])
+            self.assertEqual(terminal['event_type'],'experience.closed')
+            self.assertEqual(terminal['correlation_id'],cid)
+            self.assertEqual(result['unresolved_refs'],[])
+            self.assertEqual(terminal['run_id'],result['run_id'])
+            self.assertNotEqual(terminal['source_instance_id'],result['run_id'])
+            old_run_events=[e for e in read_events(db,limit=1000)['events'] if e['run_id']==result['run_id']]
+            self.assertTrue(any(e['event_id']==result['terminal_event_id'] for e in old_run_events))
 
     def test_untrusted_envelope_cannot_bypass_payload_privacy(self):
         r=self.recorder();e=r.factory.make('run.heartbeat',{})

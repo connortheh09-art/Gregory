@@ -44,6 +44,16 @@ class CollectorIntegration(unittest.TestCase):
               'points':[{'x':500,'y':0,'z':0}],'lease':2.5},state,'session','idle',observer=observer)
         return json.loads((self.root/'cmd.json').read_text())
 
+    def test_startup_hash_snapshot_includes_local_lua_without_claiming_deployment(self):
+        import hashlib
+        snapshot=bridge.source_manifest()
+        hashes={entry['id']:entry['version'] for entry in snapshot['files']}
+        source=ROOT/'deployments'/'oldpc'/'lua'/'greg_locomotion.lua'
+        self.assertEqual(hashes['lua/greg_locomotion.lua'],hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(snapshot['build_commit'],'unknown')
+        self.assertEqual(snapshot['coverage'],'collector_tree_snapshot')
+        self.assertFalse(snapshot['truncated'])
+
     def test_actual_payload_same_with_noop_or_raising_observer(self):
         fixed=1000
         with patch.object(bridge,'p0_trace'),patch.object(bridge.time,'time',return_value=fixed):
@@ -111,7 +121,7 @@ class CollectorIntegration(unittest.TestCase):
         self.assertIsNotNone(social.last_returned_trace)
         self.assertIsNone(tracker.active_trace)
 
-    def run_collector(self,enabled):
+    def run_collector(self,enabled,*,playercore=True,goal_result=None,vision=False,sensor_error=False,reject_goal=False):
         directory=self.root/('on' if enabled else 'off');directory.mkdir()
         class Clock:
             now=0.
@@ -139,9 +149,11 @@ class CollectorIntegration(unittest.TestCase):
             if path.exists():
                 value=json.loads(path.read_text());commands.append(value)
                 if value['action'].get('action')=='navigate' and clock.nav_started is None: clock.nav_started=clock.now
-        argv=['gmod_bridge.py','--data',str(directory),'--steamid','actor','--model','local','--playercore',
+        argv=['gmod_bridge.py','--data',str(directory),'--steamid','actor','--model','local',
               '--no-social','--turns','4','--memory-dir',str(directory/'memory'),
               '--chat-memory',str(directory/'chat-memory.json')]
+        if playercore: argv+=['--playercore']
+        if vision: argv+=['--vision-helper','offline-fixture-only']
         if enabled: argv+=['--recorder','--recorder-db',str(directory/'recorder.sqlite3')]
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(sys,'argv',argv))
@@ -150,6 +162,20 @@ class CollectorIntegration(unittest.TestCase):
             stack.enter_context(patch.object(core,'uuid',SimpleNamespace(uuid4=lambda:SimpleNamespace(hex='abcd'*8))))
             stack.enter_context(patch.object(bridge,'uuid',SimpleNamespace(uuid4=lambda:SimpleNamespace(hex='collector-session'))))
             stack.enter_context(patch.object(bridge,'SPEECH',bridge.Speech()))
+            stack.enter_context(patch.object(bridge,'PLAYERCORE',None))
+            stack.enter_context(patch.object(bridge,'MEMORY',bridge.Memory()))
+            stack.enter_context(patch.object(bridge,'DOORS',bridge.DoorProbe()))
+            stack.enter_context(patch.object(bridge,'GUIDE',bridge.Guide()))
+            stack.enter_context(patch.object(bridge,'OSC',bridge.OscillationGuard()))
+            if reject_goal:
+                stack.enter_context(patch.object(bridge.Goals,'start',return_value=False))
+            if not playercore:
+                stack.enter_context(patch.object(bridge,'pick_goal',return_value=goal_result or ''))
+                stack.enter_context(patch.object(bridge,'ask',return_value={'action':'inspect','reason':'appearance'} if vision else {'action':'wait'}))
+            if vision:
+                response.json.return_value={'model':'local','choices':[{'message':{'content':'{"action":"inspect","reason":"appearance"}'},'finish_reason':'stop'}]}
+                stack.enter_context(patch.object(bridge,'inspect',side_effect=RuntimeError('fixture') if sensor_error else None,
+                    return_value={'caption':'private sensor scene','t':2000.1}))
             stack.enter_context(patch.object(bridge,'ThreadPoolExecutor',ImmediateExecutor))
             stack.enter_context(patch.dict(sys.modules,requests=SimpleNamespace(post=Mock(return_value=response))))
             import greg_dialogue
@@ -180,6 +206,46 @@ class CollectorIntegration(unittest.TestCase):
             successes=[get_experience(db,row[0]) for row in db.execute("SELECT correlation_id FROM experiences WHERE world_outcome='succeeded'")]
             self.assertTrue(successes)
             self.assertTrue(any(e['trace_complete'] for e in successes))
+
+    def test_actual_legacy_goal_branches_finalize_without_gameplay_change(self):
+        from greg_recorder import get_experience
+        for goal,reject in (('Walk along the road',False),('',False),('Walk along the road',True)):
+            with self.subTest(goal=bool(goal),rejected=reject), tempfile.TemporaryDirectory() as root:
+                self.root=Path(root)
+                baseline,_=self.run_collector(False,playercore=False,goal_result=goal,reject_goal=reject)
+                recorded,directory=self.run_collector(True,playercore=False,goal_result=goal,reject_goal=reject)
+                self.assertEqual(baseline,recorded)
+                with open_reader(directory/'recorder.sqlite3') as db:
+                    selected=[get_experience(db,row[0]) for row in db.execute("SELECT correlation_id FROM experiences WHERE closure_reason=?",
+                        ('goal_selected' if goal and not reject else 'goal_empty_or_rejected',))]
+                self.assertTrue(selected)
+                for result in selected:
+                    self.assertEqual(result['record_state'],'closed')
+                    self.assertNotEqual(result['world_outcome'],'succeeded')
+                    self.assertTrue(result['terminal_resolved'])
+                    kinds={e['event_type'] for e in result['events']}
+                    self.assertIn('decision.applied' if goal and not reject else 'decision.discarded',kinds)
+
+    def test_actual_inspect_sensor_success_and_error_keep_parent_correlation(self):
+        from greg_recorder import get_experience
+        for fail in (False,True):
+            with self.subTest(sensor_error=fail), tempfile.TemporaryDirectory() as root:
+                self.root=Path(root)
+                baseline,_=self.run_collector(False,playercore=False,goal_result='Explore the street',vision=True,sensor_error=fail)
+                recorded,directory=self.run_collector(True,playercore=False,goal_result='Explore the street',vision=True,sensor_error=fail)
+                self.assertEqual(baseline,recorded)
+                with open_reader(directory/'recorder.sqlite3') as db:
+                    events=read_events(db,limit=1000)['events']
+                    requests=[e for e in events if e['event_type']=='sensor.requested']
+                    self.assertTrue(requests)
+                    for requested in requests:
+                        result=get_experience(db,requested['correlation_id'])
+                        kinds={e['event_type'] for e in result['events']}
+                        self.assertIn('decision.applied',kinds)
+                        self.assertIn('sensor.error' if fail else 'sensor.result',kinds)
+                        self.assertTrue(result['terminal_resolved'])
+                        self.assertNotIn('private sensor scene',json.dumps(result))
+                        self.assertEqual(sum(e['event_type']=='decision.requested' for e in result['events']),1)
 
     def test_optional_recorder_import_failure_preserves_collector(self):
         baseline,_=self.run_collector(False)
