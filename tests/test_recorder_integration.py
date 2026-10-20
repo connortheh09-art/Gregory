@@ -90,10 +90,32 @@ class CollectorIntegration(unittest.TestCase):
             with self.assertRaises(OSError) as caught: run_traced(trace,r,greg_model.post_chat,'unused',json=body)
         self.assertIs(caught.exception,failure)
 
+    def test_disabled_model_instrumentation_does_not_parse_response(self):
+        import greg_model
+        response=Mock();post=Mock(return_value=response)
+        with patch.dict(sys.modules,requests=SimpleNamespace(post=post)):
+            self.assertIs(greg_model.post_chat('unused',json={'model':'local','max_tokens':32}),response)
+        response.json.assert_not_called()
+
+    def test_social_worker_trace_does_not_replace_runtime_action(self):
+        from greg_social import SocialLane
+        r=Recorder(self.root/'social.sqlite3','s');self.addCleanup(r.close)
+        tracker=ExperienceTracker(r);sample=dict(steamid='p',map='city',bridgeSession='b',controlEpoch=1)
+        social=SocialLane('unused','local',executor=ImmediateExecutor())
+        social.recorder_tracker=tracker;social.recorder_sink=r
+        with patch.object(social,'_ask',return_value='A safe remark.'):
+            self.assertIsNone(social.tick(sample,1,0,True))
+            self.assertIsNone(social.tick(sample,1,11,True))
+            result=social.tick(sample,1,12,True)
+        self.assertEqual(result,{'action':'say','text':'A safe remark.'})
+        self.assertIsNotNone(social.last_returned_trace)
+        self.assertIsNone(tracker.active_trace)
+
     def run_collector(self,enabled):
         directory=self.root/('on' if enabled else 'off');directory.mkdir()
         class Clock:
             now=0.
+            nav_started=None
             def sleep(self,n): self.now+=n
         clock=Clock()
         class Tail:
@@ -102,20 +124,21 @@ class CollectorIntegration(unittest.TestCase):
                 if self.path.name!='state.json': return []
                 self.n+=1
                 return [json.dumps(dict(steamid='actor',bridgeSession='bridge',controlEpoch=1,map='city',
-                    serverTime=2000+clock.now,t=clock.now+.01,seq=self.n,pos=dict(x=min(500,int(clock.now*300)),y=0,z=0),
+                    serverTime=2000+clock.now,t=clock.now+.01,seq=self.n,
+                    pos=dict(x=0 if clock.nav_started is None else min(500,int((clock.now-clock.nav_started)*600)),y=0,z=0),
                     enabled=True,dead=False,menu=False,capabilities={'playercore':True},
                     locomotion={'id':'abcdabcdabcd','status':'moving','event':self.n}))]
         graph=SimpleNamespace(map='city',areas={1:SimpleNamespace(center=(500,0,0))},
              route=lambda *a:{'areas':[1],'points':[(500,0,0)],'edges':[None]})
-        def decide(self,state,landmarks,events):
-            return {'_agenda':True,'choice':{'activity':'explore'},'context':('city','bridge',1),
-                    'landmarks':[],'navigation_available':True}
+        response=Mock();response.json.return_value={'model':'local','choices':[{'message':{'content':'{"activity":"explore"}'},'finish_reason':'stop'}]}
         commands=[]
         original=bridge.write_cmd
         def writer(*args,**kwargs):
             original(*args,**kwargs)
             path=args[0]
-            if path.exists(): commands.append(json.loads(path.read_text()))
+            if path.exists():
+                value=json.loads(path.read_text());commands.append(value)
+                if value['action'].get('action')=='navigate' and clock.nav_started is None: clock.nav_started=clock.now
         argv=['gmod_bridge.py','--data',str(directory),'--steamid','actor','--model','local','--playercore',
               '--no-social','--turns','4','--memory-dir',str(directory/'memory'),
               '--chat-memory',str(directory/'chat-memory.json')]
@@ -125,8 +148,13 @@ class CollectorIntegration(unittest.TestCase):
             stack.enter_context(patch.object(bridge,'Tail',Tail))
             stack.enter_context(patch.object(core.NavGraph,'load',return_value=graph))
             stack.enter_context(patch.object(core,'uuid',SimpleNamespace(uuid4=lambda:SimpleNamespace(hex='abcd'*8))))
+            stack.enter_context(patch.object(bridge,'uuid',SimpleNamespace(uuid4=lambda:SimpleNamespace(hex='collector-session'))))
+            stack.enter_context(patch.object(bridge,'SPEECH',bridge.Speech()))
             stack.enter_context(patch.object(bridge,'ThreadPoolExecutor',ImmediateExecutor))
-            stack.enter_context(patch.object(bridge.Agenda,'decide',decide))
+            stack.enter_context(patch.dict(sys.modules,requests=SimpleNamespace(post=Mock(return_value=response))))
+            import greg_dialogue
+            stack.enter_context(patch.object(greg_dialogue,'Path',return_value=SimpleNamespace(with_name=lambda _:directory/'model-audit.jsonl')))
+            stack.enter_context(patch('greg_experience.ExperienceTracker',side_effect=lambda sink:ExperienceTracker(sink,mono=lambda:int(clock.now*1e9))))
             stack.enter_context(patch.object(bridge,'write_cmd',writer))
             stack.enter_context(patch.object(bridge,'p0_trace'))
             stack.enter_context(patch.object(bridge,'watchdog',lambda:None))
@@ -147,6 +175,23 @@ class CollectorIntegration(unittest.TestCase):
         with open_reader(on/'recorder.sqlite3') as db:
             kinds={e['event_type'] for e in read_events(db,limit=1000)['events']}
             self.assertIn('action.dispatch',kinds);self.assertIn('decision.applied',kinds)
+            self.assertIn('decision.response',kinds);self.assertIn('decision.parsed',kinds)
+            from greg_recorder import get_experience
+            successes=[get_experience(db,row[0]) for row in db.execute("SELECT correlation_id FROM experiences WHERE world_outcome='succeeded'")]
+            self.assertTrue(successes)
+            self.assertTrue(any(e['trace_complete'] for e in successes))
+
+    def test_optional_recorder_import_failure_preserves_collector(self):
+        baseline,_=self.run_collector(False)
+        import builtins
+        original=builtins.__import__
+        def guarded(name,*args,**kwargs):
+            if name=='greg_recorder': raise SyntaxError('fixture optional module unavailable')
+            return original(name,*args,**kwargs)
+        with patch.object(builtins,'__import__',side_effect=guarded):
+            unavailable,directory=self.run_collector(True)
+        self.assertEqual(baseline,unavailable)
+        self.assertFalse((directory/'recorder.sqlite3').exists())
 
     def test_cli_offline_query_export_no_overwrite_and_missing_db(self):
         r=Recorder(self.root/'history.sqlite3','s');r.wait_ready();r.record('run.heartbeat',{});r.close()

@@ -7,9 +7,10 @@ import math
 import time
 
 try:
-    from greg_events import observed as _observed
+    from greg_events import observed as _observed, current_trace as _current_trace
 except Exception:  # Optional instrumentation must not prevent collector startup.
     def _observed(*args, **kwargs): pass
+    def _current_trace(): return None
 
 _min_tokens = 0
 _timeout = 8.0
@@ -35,6 +36,8 @@ def post_chat(url, *, json, timeout=8):
     if _reasoning == 'off':
         # Verified against this deployment's LM Studio Chat Completions endpoint.
         body['reasoning_effort'] = 'none'
+    if _current_trace() is None:
+        return requests.post(url, json=body, timeout=max(timeout, _timeout))
     started = time.monotonic()
     _observed('decision.requested', {'model': body.get('model'), 'settings': {
         k: body[k] for k in ('max_tokens', 'temperature') if k in body}})
@@ -50,7 +53,7 @@ def post_chat(url, *, json, timeout=8):
         _observed('decision.response', {'model': body.get('model'), 'returned_model': value.get('model'),
             'finish_reason': choice.get('finish_reason'), 'usage': value.get('usage', {}),
             'content': (choice.get('message') or {}).get('content'),
-            'latency_ms': (time.monotonic()-started)*1000})
+            'latency_ms': (time.monotonic()-started)*1000, 'http_status': getattr(response,'status_code',None)})
     except Exception:
         _observed('decision.response', {'model': body.get('model'), 'parse_status': 'unavailable',
                                       'latency_ms': (time.monotonic()-started)*1000})

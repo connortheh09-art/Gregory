@@ -32,6 +32,7 @@ goal_id action_id decision_id correlation_id source_instance_id version native_s
 _NUMBERS = frozenset('''x y z radius duration lease hold taps yaw pitch turn throttle steer zoom t seq
 serverTime controlEpoch control_epoch intent_version command_sequence expires retries latency_ms queue_ms
 max_tokens temperature timeout captured_at age_seconds event cursor ttl set_at distance speed dwell_seconds
+http_status
 prompt_tokens completion_tokens total_tokens reasoning_tokens count first_sequence last_sequence skipped
 last_state_seq last_cmd_seq last_state_age_seconds uptime_seconds normal_depth critical_depth committed
 admitted dropped inflight errors last_commit_ns schema_version started_mono_ns clock_uncertainty_ms

@@ -18,7 +18,8 @@ class SafeTracker:
         def call(*args, **kwargs):
             try: return value(*args, **kwargs)
             except Exception:
-                self._tracker.sink.record('recorder.degraded', {'reason':'observer_error'}, priority='critical')
+                try: self._tracker.sink.record('recorder.degraded', {'reason':'observer_error'}, priority='critical')
+                except Exception: pass
                 return None
         return call
     def __setattr__(self, name, value): setattr(self._tracker, name, value)
@@ -46,6 +47,7 @@ class ExperienceTracker:
         self.scope_trace = None
         self.current_control = ControlContext()
         self.last_heartbeat = -10**20
+        self.pending_speech_trace = None
 
     def _emit(self, kind, payload, *, trace=None, refs=(), priority='critical', **kwargs):
         return self.sink.record(kind, payload, trace=trace, observation_ids=refs,
@@ -66,14 +68,14 @@ class ExperienceTracker:
                 self.close(key, 'resource_limit'); self.episodes.pop(key, None)
         return self.episodes[trace.correlation_id]
 
-    def _pin(self, oid):
+    def _pin(self, oid, *, priority='critical'):
         sample = self.samples.get(oid)
         if sample is None: return
         if sample.get('event') is None:
             sample['event'] = self.sink.factory.make('observation.accepted', sample['payload'],
                                       trace=sample['trace'], event_id=oid,
                                       wall_ns=sample['wall'], mono_ns=sample['mono'])
-        self.sink.emit(sample['event'], priority='critical')
+        self.sink.emit(sample['event'], priority=priority)
 
     def accepted_state(self, state, *, wall_ns=None, mono_ns=None):
         wall = self.clock() if wall_ns is None else wall_ns
@@ -105,7 +107,7 @@ class ExperienceTracker:
             self._emit('telemetry.resumed', {'reason':'fresh_sample'}, trace=self.active_trace)
             self.gap = False
         if now-self.last_periodic >= 1_000_000_000:
-            self._pin(oid); self.last_periodic = now
+            self._pin(oid,priority='normal'); self.last_periodic = now
         for cid, episode in list(self.episodes.items()):
             if not episode['closed'] and episode['trace'].control == control and episode['action']:
                 self._feedback(episode, state, oid, now)
@@ -129,13 +131,18 @@ class ExperienceTracker:
         self._emit('decision.applied' if accepted else 'decision.discarded',
                    {'accepted':accepted,'reason':reason,'parsed':parsed_summary or {}},trace=trace)
         if not accepted: self.close(trace.correlation_id,reason)
-        elif trace.lane != 'social': self.active_trace = trace
+        elif trace.lane != 'social':
+            episode=self.episodes.get(trace.correlation_id)
+            if episode and episode['trace'].goal_id:
+                trace=replace(trace,goal_id=episode['trace'].goal_id)
+            self.active_trace = trace
 
     def directive(self, version):
         if self.active_trace:
             self.close(self.active_trace.correlation_id,'superseded_by_chat')
         self.current_control = replace(self.current_control,intent_version=version)
         self.active_trace = None
+        self.pending_speech_trace = None
 
     def runtime_event(self, event):
         kind = event.get('kind')
@@ -149,12 +156,13 @@ class ExperienceTracker:
         if trace is None:
             # Preexisting goals: honest origin, never synthesize a missing model decision.
             trace = self.begin_decision(lane='deterministic',template_version='preexisting.v1')
+            self.decision_result(trace,accepted=True,reason='runtime_event')
         if kind == 'goal':
             trace = replace(trace,goal_id=self.goals[goal_key].goal_id if goal_key in self.goals else new_id())
             self._bounded(self.goals,goal_key,trace)
             if trace.correlation_id in self.episodes: self.episodes[trace.correlation_id]['trace'] = trace
             self._emit('goal.observed', {**event,'native_goal_id':native,'native_status':event.get('status')},trace=trace)
-            if event.get('status') in {'failed','abandoned','rejected'}:
+            if event.get('status') in {'failed','abandoned'}:
                 # A source failure is recorded separately from independent world evidence.
                 episode=self.episodes.get(trace.correlation_id,{})
                 failed=event.get('status')=='failed' and episode.get('failure_observed')
@@ -164,9 +172,22 @@ class ExperienceTracker:
             self._emit('route.observed',event,trace=trace)
 
     def dispatch(self, payload, *, trace=None, write_result='written', reason='', retries=0, speech_trace=None):
-        trace = trace or self.active_trace
         action = payload.get('action',{})
         act = action.get('action')
+        if trace is None and act=='wait' and (payload.get('mode')=='stop' or
+                payload.get('mode')=='chat' and self.active_trace is None):
+            prior=self.active_trace
+            trace=self.begin_decision(lane='deterministic',template_version='stop.v1')
+            self.decision_result(trace,accepted=True,reason='explicit_wait')
+            if payload.get('mode')=='stop': self.active_trace=prior
+        if trace is None and act=='say':
+            # A literal/status reply is not caused by the concurrent navigation model call.
+            prior=self.active_trace
+            trace=self.begin_decision(lane='deterministic',template_version='speech.v1')
+            self.decision_result(trace,accepted=True,reason='speech_submission')
+            self.active_trace=prior
+        else:
+            trace = trace or self.active_trace
         if trace is None:
             # Idle renewal/wait is telemetry, not a new fictitious goal each tick.
             if act == 'wait': return
@@ -214,7 +235,12 @@ class ExperienceTracker:
             if trace.lane != 'social': self.active_trace = trace
         elif act not in {'say','wait','gaze'}:
             self.close(trace.correlation_id,'unsupported_primitive')
-        elif trace.lane=='social':
+        elif act=='wait' and not episode['action']:
+            if payload.get('mode') in {'chat','stop'} and trace.lane=='deterministic':
+                self.close(trace.correlation_id,'stop_submitted')
+            else:
+                self.close(trace.correlation_id,'no_gameplay_action','not_applicable','not_applicable')
+        elif trace.lane=='social' or act=='say':
             self.close(trace.correlation_id,'speech_submitted')
 
     def _feedback(self, episode, state, oid, now):

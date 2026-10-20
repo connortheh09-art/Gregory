@@ -60,6 +60,18 @@ class Trace(unittest.TestCase):
         self.assertEqual(result['unresolved_refs'],[])
         self.assertNotIn('private-steam-id',json.dumps(result))
 
+    def test_five_minute_old_success_survives_recorder_restart(self):
+        import time
+        old=time.time_ns()-300_000_000_000
+        self.sink.factory.clock=lambda:old
+        trace,_=self.start();self.sample(2,2,500);self.sample(3,2.5,500);self.sample(4,3,500)
+        self.sink.close()
+        second=Recorder(self.path,'restart');second.wait_ready();second.close()
+        with open_reader(self.path) as db:
+            result=get_experience(db,trace.correlation_id)
+            self.assertTrue(result['trace_complete']);self.assertEqual(result['world_outcome'],'succeeded')
+            self.assertTrue(any(e['received_at_utc']<second.health()['started_at_utc'] for e in result['events']))
+
     def test_write_success_never_implies_world_success(self):
         trace,_=self.start();result=self.result(trace)
         self.assertEqual(result['world_outcome'],'unknown');self.assertFalse(result['trace_complete'])
@@ -136,6 +148,38 @@ class Trace(unittest.TestCase):
         self.tracker.runtime_event({'kind':'goal','id':'g','status':'failed','reason':'route_failed','map':'city'})
         result=self.result(trace)
         self.assertEqual(result['world_outcome'],'failed');self.assertEqual(result['verdict'],'fail')
+
+    def test_source_clock_utc_shift_does_not_advance_deadline(self):
+        trace,_=self.start()
+        self.tracker.clock=lambda:10**18
+        self.now+=1_000_000_000;self.tracker.tick(wall_ns=10**18)
+        self.assertFalse(self.tracker.episodes[trace.correlation_id]['closed'])
+
+    def test_conversation_does_not_steal_locomotion_ownership(self):
+        trace,_=self.start();active=self.tracker.active_trace
+        self.tracker.dispatch({'session':'s','seq':2,'action':{'action':'say','text':'status reply'}})
+        self.assertEqual(self.tracker.active_trace,active)
+        self.sample(2,2,500);self.sample(3,2.5,500);self.sample(4,3,500)
+        self.assertEqual(self.result(trace)['world_outcome'],'succeeded')
+
+    def test_rest_closes_not_applicable_without_repeated_idle_episodes(self):
+        self.sample(1,1,0);trace=self.tracker.begin_decision(lane='agenda')
+        self.tracker.decision_result(trace,accepted=True,reason='rest')
+        for i in range(10): self.tracker.dispatch({'session':'s','seq':i,'action':{'action':'wait'}})
+        self.assertEqual(len(self.tracker.episodes),1)
+        self.assertEqual(self.result(trace)['world_outcome'],'not_applicable')
+
+    def test_explicit_stop_and_shutdown_are_recorded_without_idle_goals(self):
+        self.sample(1,1,0)
+        for i in range(10): self.tracker.dispatch({'session':'s','seq':i,'mode':'idle','action':{'action':'wait'}})
+        self.assertEqual(len(self.tracker.episodes),0)
+        for i in range(10): self.tracker.dispatch({'session':'s','seq':i,'mode':'chat','action':{'action':'wait'}})
+        self.assertEqual(len(self.tracker.episodes),1)
+        self.tracker.dispatch({'session':'s','seq':20,'mode':'stop','action':{'action':'wait'}})
+        self.assertEqual(len(self.tracker.episodes),2)
+        self.sink.close()
+        with open_reader(self.path) as db:
+            for row in db.execute('SELECT world_outcome FROM experiences'): self.assertEqual(row[0],'unknown')
 
     def test_native_state_gate_rejects_stale_duplicate_and_wrong_actor(self):
         memory=EventMemory(Path(self.tmp.name)/'memory')

@@ -47,6 +47,15 @@ class Storage(unittest.TestCase):
         r=self.recorder();self.assertEqual(r.health()['status'],'degraded')
         with sqlite3.connect(self.path) as db: self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],99)
 
+    def test_unrelated_schema_one_is_not_reconfigured(self):
+        self.path.parent.mkdir()
+        with sqlite3.connect(self.path) as db:
+            db.execute('PRAGMA user_version=1');db.execute('CREATE TABLE unrelated(data)')
+        r=self.recorder();self.assertEqual(r.health()['status'],'degraded')
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0],'delete')
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM unrelated').fetchone()[0],0)
+
     def test_second_writer_lock_refused_and_first_remains_live(self):
         r=self.recorder();other=self.recorder()
         self.assertEqual(other.health()['status'],'degraded')
@@ -138,6 +147,45 @@ os._exit(0)
             self.assertLessEqual(r.health()['normal_depth'],3)
             self.assertGreater(r.health()['dropped'],0)
             r.close(deadline_seconds=.05)
+
+    def test_retention_expires_closed_run_and_emits_marker(self):
+        r=self.recorder();trace=TraceContext(r.run_id,new_id(),decision_id=new_id())
+        r.record('decision.requested',{},trace=trace,priority='critical');r.close()
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE runs SET ended_at_utc='2000-01-01T00:00:00Z'")
+        second=self.recorder();second.record('run.heartbeat',{})
+        until=time.monotonic()+2
+        while time.monotonic()<until:
+            with open_reader(self.path) as db: expired=get_experience(db,trace.correlation_id) is None
+            if expired: break
+            time.sleep(.01)
+        second.close()
+        self.assertTrue(expired)
+        with open_reader(self.path) as db:
+            kinds={e['event_type'] for e in read_events(db)['events']}
+            self.assertIn('retention.expired',kinds)
+
+    def test_reader_connection_closes_after_context(self):
+        r=self.recorder();r.close()
+        with open_reader(self.path) as db: self.assertEqual(db.execute('SELECT 1').fetchone()[0],1)
+        with self.assertRaises(sqlite3.ProgrammingError): db.execute('SELECT 1')
+
+    def test_transient_writer_fault_recovers_with_durable_markers(self):
+        r=self.recorder();original=r._transaction;failed=[False]
+        def transient(*args,**kwargs):
+            if not failed[0]:
+                failed[0]=True;raise sqlite3.OperationalError('fixture busy')
+            return original(*args,**kwargs)
+        from unittest.mock import patch
+        with patch.object(r,'_transaction',side_effect=transient):
+            r.record('run.heartbeat',{})
+            until=time.monotonic()+2
+            while time.monotonic()<until:
+                with open_reader(self.path) as db:
+                    recovered=db.execute("SELECT 1 FROM events WHERE event_type='recorder.recovered'").fetchone()
+                if recovered: break
+                time.sleep(.01)
+        r.close();self.assertTrue(recovered)
 
 
 if __name__=='__main__': unittest.main()

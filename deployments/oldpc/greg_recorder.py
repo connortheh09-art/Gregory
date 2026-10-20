@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import deque
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -75,7 +76,8 @@ def writer_lock(path):
 class Recorder:
     enabled = True
     def __init__(self, path, session_id, *, text='metadata', retention_days=7, max_mib=1024,
-                 normal_limit=1024, critical_limit=256, connect=sqlite3.connect, build=None):
+                 normal_limit=1024, critical_limit=256, connect=sqlite3.connect, build=None,
+                 coverage='playercore_navigation'):
         self.path = Path(path).absolute()
         if str(path).startswith(('\\\\', '//')): raise ValueError('recorder requires local disk')
         if not 1 <= retention_days <= 365 or not 1 <= max_mib <= 102400:
@@ -85,11 +87,14 @@ class Recorder:
         self.factory = EventFactory(self.run_id, session_id, text=text)
         self.retention_days, self.max_bytes = retention_days, max_mib * 1024 * 1024
         self._connect, self._build = connect, sanitize(build or {})
+        if coverage not in {'playercore_navigation','legacy_dispatch_only'}: raise ValueError('invalid coverage')
+        self._coverage=coverage
         self._queues = {'normal': deque(), 'critical': deque()}
         self._limits = {'normal': normal_limit, 'critical': critical_limit}
         self._cv = threading.Condition()
         self._closing = False
         self._budget_halted = False
+        self._decision_parents = {}
         self._stats = dict(status='starting', admitted=0, committed=0, dropped=0, invalid=0,
                            inflight=0, errors=0, last_error=None, last_ingest_sequence=0,
                            last_commit_utc=None, losses={}, started_at_utc=utc())
@@ -99,8 +104,17 @@ class Recorder:
 
     def record(self, kind, payload=None, *, trace=None, priority='normal', **kwargs):
         try:
+            if trace is not None and trace.decision_id:
+                with self._cv: parent=self._decision_parents.get(trace.decision_id)
+                if parent: trace=replace(trace,causation_id=parent)
             event = self.factory.make(kind, payload, trace=trace, **kwargs)
-            return event if self.emit(event, priority=priority) == 'queued' else None
+            if self.emit(event, priority=priority) != 'queued': return None
+            if trace is not None and trace.decision_id:
+                with self._cv:
+                    self._decision_parents[trace.decision_id]=event.as_dict()['event_id']
+                    while len(self._decision_parents)>1024:
+                        self._decision_parents.pop(next(iter(self._decision_parents)))
+            return event
         except Exception:
             with self._cv: self._stats['invalid'] += 1
             return None
@@ -160,16 +174,19 @@ class Recorder:
             if db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone():
                 raise ValueError('unrecognized database')
             try:
-                db.executescript('BEGIN IMMEDIATE;\n' + DDL + '\nPRAGMA user_version=1;\nCOMMIT;')
+                db.executescript('BEGIN IMMEDIATE;\n' + DDL +
+                    "\nINSERT INTO meta VALUES ('format','gregory.experience.v1');\nPRAGMA user_version=1;\nCOMMIT;")
             except Exception:
                 if db.in_transaction: db.rollback()
                 raise
+        else:
+            known_schema(db)
         if db.execute('PRAGMA journal_mode=WAL').fetchone()[0].lower() != 'wal':
             raise ValueError('WAL unavailable')
         db.execute('PRAGMA synchronous=FULL')
         db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', ('database_id', new_id()))
         started = self.factory.make('run.started', {'build': self._build, 'python_version': platform.python_version(),
-                                    'sqlite_version': sqlite3.sqlite_version, 'coverage': 'playercore_navigation'})
+                                    'sqlite_version': sqlite3.sqlite_version, 'coverage': self._coverage})
         self._transaction(db, [started], startup=True)
 
     def _insert(self, db, event):
@@ -215,7 +232,7 @@ class Recorder:
             if startup:
                 db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?)',
                            (self.run_id, self.session_id, utc(), None, None,
-                            json.dumps(self._build), json.dumps({'navigation': True, 'voice': False, 'media': False})))
+                            json.dumps(self._build), json.dumps({'navigation': self._coverage=='playercore_navigation', 'voice': False, 'media': False})))
                 # Recovery events belong to the new process; old outcomes remain unknown.
                 old_runs = [r[0] for r in db.execute('SELECT run_id FROM runs WHERE ended_at_utc IS NULL AND run_id<>?', (self.run_id,))]
                 for old in old_runs:
@@ -242,11 +259,13 @@ class Recorder:
             ids = [r[0] for r in db.execute('SELECT event_id FROM events WHERE run_id=? LIMIT 64', (run,))]
             db.execute('BEGIN IMMEDIATE')
             try:
+                db.execute("UPDATE runs SET end_reason='retention_expiring' WHERE run_id=?",(run,))
                 for eid in ids:
                     db.execute('DELETE FROM links WHERE from_event_id=? OR (to_id=? AND to_kind=?)', (eid,eid,'event'))
                     db.execute('DELETE FROM events WHERE event_id=?', (eid,))
                 if not db.execute('SELECT 1 FROM events WHERE run_id=? LIMIT 1',(run,)).fetchone():
                     db.execute('DELETE FROM experiences WHERE run_id=?',(run,)); db.execute('DELETE FROM runs WHERE run_id=?',(run,))
+                    self._insert(db,self.factory.make('retention.expired',{'expired_count':1}))
                 db.commit()
             except Exception: db.rollback(); raise
         total = sum(p.stat().st_size for p in (self.path, Path(str(self.path)+'-wal')) if p.exists())
@@ -275,6 +294,7 @@ class Recorder:
                 self._ready.set()
                 maintained = health_at = 0.0
                 error_log_at = -10**20
+                pending_error = None
                 served = 0
                 reported_loss = 0
                 while True:
@@ -292,12 +312,19 @@ class Recorder:
                         if pending:
                             self._transaction(db, pending)
                             pending = []
+                        if pending_error is not None:
+                            category, count, wall, mono = pending_error
+                            self._transaction(db,[
+                                self.factory.make('recorder.degraded',{'error_category':category,'count':count},wall_ns=wall,mono_ns=mono),
+                                self.factory.make('recorder.recovered',{'error_category':category,'count':count})])
+                            pending_error = None
                         now = time.monotonic()
                         if now-maintained >= 5:
                             self._maintenance(db); maintained = now
                         loss = self.health()['dropped']
                         if loss != reported_loss:
-                            event = self.factory.make('recorder.loss', {'count': loss, 'losses': self.health()['losses']})
+                            losses=[dict(row,reason=reason) for reason,row in self.health()['losses'].items()]
+                            event = self.factory.make('recorder.loss', {'count': loss, 'losses': losses})
                             self._transaction(db,[event]); reported_loss = loss
                         with self._cv:
                             self._stats['status'] = 'budget_halted' if self._budget_halted else 'ready'
@@ -305,6 +332,11 @@ class Recorder:
                         if now-health_at >= 2:
                             self._health_file(); health_at = now
                     except Exception as exc:
+                        if pending_error is None:
+                            pending_error=(type(exc).__name__,1,time.time_ns(),time.monotonic_ns())
+                        else:
+                            category,count,wall,mono=pending_error
+                            pending_error=(category,count+1,wall,mono)
                         with self._cv:
                             self._stats['errors'] += 1; self._stats['status'] = 'degraded'
                             self._stats['last_error'] = type(exc).__name__
@@ -317,6 +349,9 @@ class Recorder:
                         # Writer-only backoff; admissions remain bounded and nonblocking.
                         with self._cv: self._cv.wait(.5)
                 if not pending:
+                    if pending_error is not None:
+                        category,count,wall,mono=pending_error
+                        self._transaction(db,[self.factory.make('recorder.degraded',{'error_category':category,'count':count},wall_ns=wall,mono_ns=mono)])
                     self._transaction(db,[self.factory.make('run.ended', {'reason': 'orderly'})])
                 with self._cv:
                     self._stats['status'] = 'closed' if not pending else 'degraded'
@@ -332,32 +367,57 @@ class Recorder:
             if db is not None: db.close()
 
 
+class ReadConnection(sqlite3.Connection):
+    def __enter__(self):
+        self.execute('BEGIN')
+        return self
+    def __exit__(self,*args):
+        try: return super().__exit__(*args)
+        finally: self.close()
+
+
+def known_schema(db):
+    try:
+        marker=db.execute("SELECT value FROM meta WHERE key='format'").fetchone()
+        tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not marker or marker[0]!='gregory.experience.v1' or not {'runs','events','links','experiences'}<=tables:
+            raise ValueError('unrecognized recorder schema')
+    except sqlite3.DatabaseError as exc:
+        raise ValueError('unrecognized recorder schema') from exc
+
+
 def open_reader(path):
     path = Path(path).resolve()
-    db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.25)
+    db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.25,
+                         isolation_level=None,factory=ReadConnection)
     db.execute('PRAGMA query_only=ON')
     if db.execute('PRAGMA user_version').fetchone()[0] != 1:
         db.close(); raise ValueError('unsupported recorder schema')
+    try: known_schema(db)
+    except Exception:
+        db.close(); raise
     db.row_factory = sqlite3.Row
     return db
 
 
 def read_events(db, *, after=0, limit=100, max_bytes=1048576):
     if isinstance(after,bool) or after < 0 or not 1 <= limit <= 1000: raise ValueError('invalid cursor/limit')
-    rows = db.execute('SELECT ingest_sequence,envelope_json FROM events WHERE ingest_sequence>? ORDER BY ingest_sequence LIMIT ?', (after,limit)).fetchall()
+    rows = db.execute('''SELECT e.ingest_sequence,e.envelope_json FROM events e JOIN runs r ON r.run_id=e.run_id
+        WHERE e.ingest_sequence>? AND COALESCE(r.end_reason,'')<>'retention_expiring'
+        ORDER BY e.ingest_sequence LIMIT ?''', (after,limit)).fetchall()
     events, size, cursor = [], 0, after
     for row in rows:
         if size + len(row['envelope_json']) > max_bytes: break
         value = json.loads(row['envelope_json']); value['ingest_sequence'] = row['ingest_sequence']
         events.append(value); cursor = row['ingest_sequence']; size += len(row['envelope_json'])
-    first = db.execute('SELECT MIN(ingest_sequence) FROM events').fetchone()[0]
+    first = db.execute("SELECT MIN(e.ingest_sequence) FROM events e JOIN runs r ON r.run_id=e.run_id WHERE COALESCE(r.end_reason,'')<>'retention_expiring'").fetchone()[0]
     return dict(database_id=db.execute("SELECT value FROM meta WHERE key='database_id'").fetchone()[0],
                 first_available_cursor=first, next_cursor=cursor, events=events,
-                retention_gap=bool(after and first and after < first-1))
+                retention_gap=bool(after and first and after < first-1),coverage='committed_events_only')
 
 
 def get_experience(db, correlation_id):
-    row = db.execute('SELECT * FROM experiences WHERE correlation_id=?', (correlation_id,)).fetchone()
+    row = db.execute("SELECT e.* FROM experiences e JOIN runs r ON r.run_id=e.run_id WHERE e.correlation_id=? AND COALESCE(r.end_reason,'')<>'retention_expiring'", (correlation_id,)).fetchone()
     if row is None: return None
     events = [json.loads(r[0]) for r in db.execute('''SELECT envelope_json FROM events WHERE correlation_id=? OR event_id IN
                 (SELECT from_event_id FROM links WHERE to_id=? AND to_kind='correlation') ORDER BY ingest_sequence''', (correlation_id,correlation_id))]
@@ -372,7 +432,8 @@ def get_experience(db, correlation_id):
     primary = [e for e in events if e['correlation_id']==correlation_id]
     kinds = {e['event_type'] for e in primary}
     has_exact_action = any(e['event_type']=='action.dispatch' and e['payload'].get('parameters_complete') for e in primary)
-    result['trace_complete'] = not missing and has_exact_action and {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'} <= kinds
+    model_origin=any(e['event_type']=='decision.requested' and e['payload'].get('origin')=='model' for e in primary)
+    result['trace_complete'] = not missing and has_exact_action and (not model_origin or 'decision.response' in kinds) and {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'} <= kinds
     return result
 
 
@@ -385,4 +446,9 @@ def backup(db, output, *, deadline_seconds=5):
     def progress(*_):
         if time.monotonic()-started > deadline_seconds: raise TimeoutError('backup deadline')
     try: db.backup(target, pages=64, progress=progress, sleep=.01)
+    except Exception:
+        target.close()
+        try: path.unlink()
+        except OSError: pass
+        raise
     finally: target.close()

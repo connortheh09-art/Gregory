@@ -1360,11 +1360,14 @@ def main() -> int:
             from greg_events import run_traced
             recorder = Recorder(a.recorder_db or str(Path(__file__).resolve().parent / 'greg_recorder' / 'experience.sqlite3'),
                                 session, text=a.recorder_text, retention_days=a.recorder_retention_days,
-                                max_mib=a.recorder_max_mib, build=source_manifest())
+                                max_mib=a.recorder_max_mib, build=dict(source_manifest(),model=model,provider='configured_compatible'),
+                                coverage='playercore_navigation' if a.playercore else 'legacy_dispatch_only')
             tracker = SafeTracker(ExperienceTracker(recorder))
             def record_command(payload, **status):
                 speech_trace = social.last_returned_trace if payload.get('action',{}).get('speech') else None
-                tracker.dispatch(payload,speech_trace=speech_trace,**status)
+                trace=tracker.pending_speech_trace if payload.get('action',{}).get('action')=='say' else None
+                tracker.dispatch(payload,trace=trace,speech_trace=speech_trace,**status)
+                if trace is not None: tracker.pending_speech_trace=None
             _COMMAND_OBSERVER = record_command
             if PLAYERCORE is not None: PLAYERCORE.observer = tracker.runtime_event
             social.recorder_tracker = tracker
@@ -1691,6 +1694,7 @@ def main() -> int:
                         intent.last_say = text
                         intent.history.append({"role": "assistant", "content": text})
                         pending_say = (now + 0.35, intent.version, text)
+                        if tracker is not None: tracker.pending_speech_trace=ready_trace
                     else:
                         log("say rejected: lexical echo or repeated reply")
                 blocked_fold = False
