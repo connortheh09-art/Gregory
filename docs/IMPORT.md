@@ -27,24 +27,29 @@ Hashes are of the **original** files as captured, before scrubbing.
 | `legacy/rig-2026-10-15/playercore/watchdog.py` | `C:\Users\Conman\Downloads\openclaw\greg\watchdog.py` | `4501ca231290c9709f67078f89199369824e39178cf5060fe9c6c97b80d0f87a` | 2,181 | 2026-10-13 03:23:32Z |
 | `legacy/rig-2026-10-15/voice/gdiscord.py` | `C:\Users\Conman\Downloads\openclaw\greg\gdiscord.py` | `cb8c38e1974bb845e67b9cc37d5d84a57f12c0c6bbad3a725e5ca92147e6dfcd` | 32,964 | 2026-10-14 02:33:44Z |
 
-## Known scope gaps (raised in review)
+## Known scope gaps — legacy snapshot only
 
-- This capture is the **rig** tree. The last-verified playercore deployment lives on the old PC
-  (KELLENWORKSPACE); `greg_playercore.py` and `greg_goal_lifecycle.py` are **not** in this snapshot.
-  Treat this branch as the rig baseline, not the canonical deployed revision.
-- `bridge/respawn_cam.py` is **Minecraft-era** tooling (RCON/spectate), not GMod. Kept for completeness,
-  documented here so it isn't mistaken for part of the GMod player loop.
-- `playercore/gregctl.py` and `playercore/watchdog.py` still reference the original absolute install
-  directory and PS1 helpers that were not imported; `gregman.py` expects `gdiscord.py` alongside it.
+Everything below applies to `legacy/rig-2026-10-15/`. The canonical deployment is
+`deployments/oldpc/`, imported hash-verified in `c5dc178`.
+
+- **Resolved — wrong baseline.** This snapshot was never the deployed revision. The old-PC
+  playercore and goal lifecycle (`greg_playercore.py`, `greg_goal_lifecycle.py`) now live in
+  `deployments/oldpc/`. This tree is provenance only.
+- `legacy/rig-2026-10-15/bridge/respawn_cam.py` is **Minecraft-era** tooling (RCON/spectate),
+  not GMod. Kept for completeness so it isn't mistaken for part of the GMod player loop.
+- **Resolved — absolute paths and missing helpers.** Fixed in `68443e6`: `HERE` now derives from
+  `GREG_HOME` or the script directory; `findproc.ps1`, `killproc.ps1` and `killgdiscord.ps1`
+  are imported into `playercore/`; `gregctl`/`watchdog` locate `gdiscord.py` through `_find()`
+  (beside the script, then `../voice/`).
 
 ## Scrub log
 
-- `bridge/gbrain.py`: hardcoded LM Studio token → `LM_API_TOKEN` env (was a live secret).
-- `bridge/respawn_cam.py`: hardcoded RCON password → `RCON_PASS` env; RCON host/port and log path → env.
-- `bridge/respawn_cam.py`: push URL → `PUSH_URL` env.
-- `bridge/vision_loop.py`: context URL default → `CONTEXT_URL` env.
-- `playercore/gregman.py`: `CTX_URL`/`BRAIN_URL` → env.
-- `voice/gdiscord.py`: three VPS endpoints → env.
+- `legacy/rig-2026-10-15/bridge/gbrain.py`: hardcoded LM Studio token → `LM_API_TOKEN` env (was a live secret).
+- `legacy/rig-2026-10-15/bridge/respawn_cam.py`: hardcoded RCON password → `RCON_PASS` env; RCON host/port and log path → env.
+- `legacy/rig-2026-10-15/bridge/respawn_cam.py`: push URL → `PUSH_URL` env.
+- `legacy/rig-2026-10-15/bridge/vision_loop.py`: context URL default → `CONTEXT_URL` env.
+- `legacy/rig-2026-10-15/playercore/gregman.py`: `CTX_URL`/`BRAIN_URL` → env.
+- `legacy/rig-2026-10-15/voice/gdiscord.py`: three VPS endpoints → env.
 - Bot tokens are read from `vbottoken.txt` / `lmtoken.txt` at runtime — see `config.example/`.
 
 ## Not imported
