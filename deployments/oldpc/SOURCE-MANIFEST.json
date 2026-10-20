@@ -1,0 +1,169 @@
+{
+  "machine": "KELLENWORKSPACE",
+  "account": "lesle",
+  "nodeId": "6ec91c6b135ae4c505c5ced0fcb6443532ed65923edb00d37f69cdf6cccbdad3",
+  "transport": "node_exec PowerShell read-back, bounded base64 chunks, archive and member SHA-256 verified",
+  "runtimeStatus": "No matching Python/GMod/hl2 processes returned during capture; on-disk source snapshot only.",
+  "files": [
+    {
+      "sha256": "BDDE947BE98154A6181FC224216D8F2141C598DAF2CB0A7C8C195E468F785DAD",
+      "mtimeUtc": "2026-10-17T01:23:46.5135987Z",
+      "name": "gmod_bridge.py",
+      "source": "C:\\Users\\lesle\\openclaw\\gmod_bridge.py",
+      "length": 84432,
+      "repositoryPath": "deployments/oldpc/gmod_bridge.py",
+      "importSha256": "949b2f262146525ae13635dfc4c69d2a24550de230fed85ed83375ae7f197ba5",
+      "scrubs": [
+        "Replace personal trace path with GREG_TRACE_PATH; default trace.jsonl beside collector."
+      ]
+    },
+    {
+      "sha256": "282C148BD9F22066D0521E6E54C97F79EE466EA1BBCFB041575B6A156DC325A5",
+      "mtimeUtc": "2026-10-17T01:23:46.5146005Z",
+      "name": "greg_playercore.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_playercore.py",
+      "length": 25265,
+      "repositoryPath": "deployments/oldpc/greg_playercore.py",
+      "importSha256": "282c148bd9f22066d0521e6e54c97f79ee466ea1bbcfb041575b6a156dc325a5",
+      "scrubs": []
+    },
+    {
+      "sha256": "BD4BDF3A28C5945D057B680F64917AB2D28F9CAC5EA6ACC4F998D2E1B7ED7CF7",
+      "mtimeUtc": "2026-10-17T01:23:46.5176013Z",
+      "name": "greg_goal_lifecycle.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_goal_lifecycle.py",
+      "length": 4954,
+      "repositoryPath": "deployments/oldpc/greg_goal_lifecycle.py",
+      "importSha256": "bd4bdf3a28c5945d057b680f64917ab2d28f9cac5ea6acc4f998d2e1b7ed7cf7",
+      "scrubs": []
+    },
+    {
+      "sha256": "409157B6C3D27C3ED1D5DF92703A7AFBE6C4F65363CD7BD2813DC0283D056484",
+      "mtimeUtc": "2026-10-17T01:23:46.5156007Z",
+      "name": "greg_agenda.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_agenda.py",
+      "length": 6393,
+      "repositoryPath": "deployments/oldpc/greg_agenda.py",
+      "importSha256": "409157b6c3d27c3ed1d5df92703a7afbe6c4f65363cd7bd2813dc0283d056484",
+      "scrubs": []
+    },
+    {
+      "sha256": "E31C1E9CC24ACE3933ED3FD9894E19FFAAAB0430C93CD60F78D42D84A804E9FF",
+      "mtimeUtc": "2026-10-16T20:39:17.5341646Z",
+      "name": "greg_catalog.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_catalog.py",
+      "length": 3770,
+      "repositoryPath": "deployments/oldpc/greg_catalog.py",
+      "importSha256": "e31c1e9cc24ace3933ed3fd9894e19ffaaab0430c93cd60f78d42d84a804e9ff",
+      "scrubs": []
+    },
+    {
+      "sha256": "23F9C9A567B74C80D4053944C68D0C717D541B7047243C32839480C4E902D8A3",
+      "mtimeUtc": "2026-10-15T23:22:24.3389762Z",
+      "name": "greg_chat_memory.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_chat_memory.py",
+      "length": 6592,
+      "repositoryPath": "deployments/oldpc/greg_chat_memory.py",
+      "importSha256": "23f9c9a567b74c80d4053944c68d0c717d541b7047243c32839480c4e902d8a3",
+      "scrubs": []
+    },
+    {
+      "sha256": "B0EA2ABF7D6871C351D41E280B17D6ADE963976E63C5183732F674F748972406",
+      "mtimeUtc": "2026-10-16T20:39:17.5281333Z",
+      "name": "greg_dialogue.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_dialogue.py",
+      "length": 1838,
+      "repositoryPath": "deployments/oldpc/greg_dialogue.py",
+      "importSha256": "b0ea2abf7d6871c351d41e280b17d6ade963976e63c5183732f674f748972406",
+      "scrubs": []
+    },
+    {
+      "sha256": "C3BE167B5CA3CDB3BD5D0F138E3D0EA5333B539E4BB2B753BC4BBAAFCE3BB22A",
+      "mtimeUtc": "2026-10-16T20:39:17.5251325Z",
+      "name": "greg_social.py",
+      "source": "C:\\Users\\lesle\\openclaw\\greg_social.py",
+      "length": 4441,
+      "repositoryPath": "deployments/oldpc/greg_social.py",
+      "importSha256": "c3be167b5ca3cdb3bd5d0f138e3d0ea5333b539e4bb2b753bc4bbaafce3bb22a",
+      "scrubs": []
+    },
+    {
+      "name": "greg_catalog.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\greg_catalog.lua",
+      "sha256": "4F4EF9356F08A17A5A63A3D0CFE165252FEBDD7A296E7A4A6F9A606439F137FD",
+      "mtimeUtc": "2026-10-16T20:39:17.5381656Z",
+      "length": 4467,
+      "relative": "greg_catalog.lua",
+      "repositoryPath": "deployments/oldpc/lua/greg_catalog.lua",
+      "importSha256": "4f4ef9356f08a17a5a63a3d0cfe165252febdd7a296e7a4a6f9a606439f137fd",
+      "scrubs": []
+    },
+    {
+      "name": "greg_locomotion.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\greg_locomotion.lua",
+      "sha256": "035C9B3D5EC54638DC26CAEB8D2934661D1C3EEC6E4F76F4531943F2DFB2FCF3",
+      "mtimeUtc": "2026-10-16T00:02:41.7980322Z",
+      "length": 7135,
+      "relative": "greg_locomotion.lua",
+      "repositoryPath": "deployments/oldpc/lua/greg_locomotion.lua",
+      "importSha256": "035c9b3d5ec54638dc26caeb8d2934661d1c3eec6e4f76f4531943f2dfb2fcf3",
+      "scrubs": []
+    },
+    {
+      "name": "greg_rescue.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\greg_rescue.lua",
+      "sha256": "F48BFBC4DB31C8AC525E5CCAAB98BC07D28F4C9B0CE31B9D1BF0AB7AB24D695B",
+      "mtimeUtc": "2026-10-15T22:59:56.5759350Z",
+      "length": 6677,
+      "relative": "greg_rescue.lua",
+      "repositoryPath": "deployments/oldpc/lua/greg_rescue.lua",
+      "importSha256": "f48bfbc4db31c8ac525e5ccaab98bc07d28f4c9b0ce31b9d1bf0ab7ab24d695b",
+      "scrubs": []
+    },
+    {
+      "name": "greg_bridge.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\autorun\\client\\greg_bridge.lua",
+      "sha256": "874A45405F3121745E5650C4D053245FCFCB583F852996CC0B99609215A735A3",
+      "mtimeUtc": "2026-10-16T20:39:17.5371651Z",
+      "length": 26317,
+      "relative": "autorun\\client\\greg_bridge.lua",
+      "repositoryPath": "deployments/oldpc/lua/autorun/client/greg_bridge.lua",
+      "importSha256": "874a45405f3121745e5650c4d053245fcfcb583f852996cc0b99609215a735a3",
+      "scrubs": []
+    },
+    {
+      "name": "greg_nav.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\autorun\\server\\greg_nav.lua",
+      "sha256": "9F05B31E2E1E8C7B9DE3BD3BE48A095E46CF379FF60D1979A9C103D65ABB690C",
+      "mtimeUtc": "2026-10-15T02:50:25.3842643Z",
+      "length": 7984,
+      "relative": "autorun\\server\\greg_nav.lua",
+      "repositoryPath": "deployments/oldpc/lua/autorun/server/greg_nav.lua",
+      "importSha256": "9f05b31e2e1e8c7b9de3bd3be48a095e46cf379ff60d1979a9c103d65abb690c",
+      "scrubs": []
+    },
+    {
+      "name": "greg_spawn_observer.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\autorun\\server\\greg_spawn_observer.lua",
+      "sha256": "E8E8C3BF975D1C36D8868DD7C906D0B3AB16D59111FA9BEFA12CA0E98F8269C9",
+      "mtimeUtc": "2026-10-16T20:39:17.5396682Z",
+      "length": 1401,
+      "relative": "autorun\\server\\greg_spawn_observer.lua",
+      "repositoryPath": "deployments/oldpc/lua/autorun/server/greg_spawn_observer.lua",
+      "importSha256": "e8e8c3bf975d1c36d8868dd7c906d0b3ab16d59111fa9befa12ca0e98f8269c9",
+      "scrubs": []
+    },
+    {
+      "name": "greg_sv.lua",
+      "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\GarrysMod\\garrysmod\\lua\\autorun\\server\\greg_sv.lua",
+      "sha256": "C412750A0E1120202ACC4FAAAE6967C834F2E1F14B250CC46D187EF8BB06C063",
+      "mtimeUtc": "2026-10-16T20:39:17.5406695Z",
+      "length": 8436,
+      "relative": "autorun\\server\\greg_sv.lua",
+      "repositoryPath": "deployments/oldpc/lua/autorun/server/greg_sv.lua",
+      "importSha256": "c412750a0e1120202acc4faaae6967c834f2e1f14b250cc46d187ef8bb06c063",
+      "scrubs": []
+    }
+  ],
+  "captureDateUtc": "2026-10-20"
+}
