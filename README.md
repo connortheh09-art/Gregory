@@ -28,8 +28,8 @@ Next: fatten the state feed, real goal memory, reflex/brain split. See [`docs/PL
 ## Layout (planned)
 
 ```
-bridge/      gmod_bridge.py, controllers
-lua/         greg_bridge.lua and addon files
+deployments/oldpc/   CANONICAL: gmod_bridge.py --playercore + modules + lua/
+legacy/rig-2026-10-15/  older rig snapshot, provenance only
 docs/        plan, architecture notes
 tools/       helper scripts (start/stop, QA)
 ```
