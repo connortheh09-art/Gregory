@@ -6,6 +6,7 @@ import json
 import random
 import re
 import requests
+from greg_model import post_chat
 
 
 def context(state, version):
@@ -38,7 +39,7 @@ class SocialLane:
 
     def _ask(self, state, messages):
         observed = {k: state.get(k) for k in ('map','nearby','dead')}
-        response = requests.post(self.lm, timeout=8, json={
+        response = post_chat(self.lm, timeout=8, json={
             'model': self.model, 'temperature': .75, 'max_tokens': 90,
             'messages': [{'role':'system', 'content':
                 'You are Gregory, a dry, curious Garry\'s Mod player. You are playing while talking. '

@@ -6,8 +6,8 @@ Python/GMod/hl2 processes were returned during capture. No game was started,
 stopped, or updated.
 
 This directory is separate from the rig-era top-level `bridge/`, `playercore/`
-and `lua/` imports. Do not mix their revisions. Keep these eight Python files
-together: the collector imports its siblings directly. The `lua/` subtree
+and `lua/` imports. Do not mix their revisions. Keep the collector and all sibling
+`greg_*.py` modules together: the collector imports its siblings directly. The `lua/` subtree
 preserves the installed relative paths, including client/server autorun files.
 
 ## Provenance and changes
@@ -15,6 +15,8 @@ preserves the installed relative paths, including client/server autorun files.
 The import description below refers to the original snapshot. Subsequent memory
 and decision improvements, offline checks, and remaining runtime acceptance are
 documented in [MEMORY-IMPROVEMENTS.md](../../docs/MEMORY-IMPROVEMENTS.md).
+Live deployment and Gemma/Qwen checks are recorded in
+[DEPLOYMENT-2026-10-20.md](../../docs/DEPLOYMENT-2026-10-20.md).
 
 `SOURCE-MANIFEST.json` records original absolute paths, exact original mtimes,
 byte counts, full original SHA-256 and imported SHA-256 for all 15 files.

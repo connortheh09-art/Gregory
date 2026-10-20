@@ -2,6 +2,7 @@
 import json,time,random
 from collections import deque
 import requests
+from greg_model import post_chat
 from greg_dialogue import model_json,dialogue
 
 class Agenda:
@@ -38,7 +39,7 @@ class Agenda:
             "Never invent IDs, landmark names, outcomes or permissions. You may add announcement: "
             "one short in-character sentence describing your intention, never reasoning or telemetry. "
             "Server Sandbox permissions and limits apply; a request is not a confirmed spawn.")
-        response=requests.post(self.lm,timeout=8,json={'model':self.model,'temperature':.85,'max_tokens':180,
+        response=post_chat(self.lm,timeout=8,json={'model':self.model,'temperature':.85,'max_tokens':180,
             'messages':[{'role':'system','content':system},{'role':'user','content':json.dumps(payload)}]})
         response.raise_for_status()
         value=model_json(response.json()['choices'][0]['message'],'agenda')

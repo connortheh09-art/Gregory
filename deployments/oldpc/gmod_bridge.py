@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 import requests
+from greg_model import post_chat
 
 from greg_playercore import Runtime, NavGraph, EventMemory
 from greg_goal_lifecycle import Goals, Speech
@@ -946,7 +947,7 @@ def ask(lm: str, model: str, goal: str, state: dict, mode: str = "chat",
         "messages": [{"role": "system", "content": SYSTEM + core_system + " Conversation history is scoped to this speaker. Resolve follow-up comments using that thread; old measurements are historical, never current coordinates. Use only in-character spoken dialogue in reply. No reasoning or telemetry narration."}]
                     + (history or [])[-8:] + [{"role": "user", "content": user}],
     }
-    r = requests.post(lm, json=body, timeout=8)
+    r = post_chat(lm, json=body, timeout=8)
     r.raise_for_status()
     return model_json(r.json()["choices"][0]["message"], "action")
 
@@ -975,7 +976,7 @@ def pick_goal(lm: str, model: str, state: dict, recent: str, done: list,
     body = {"model": model, "temperature": 0.9, "max_tokens": 32,
             "messages": [{"role": "system", "content": GOAL_SYSTEM},
                          {"role": "user", "content": user}]}
-    r = requests.post(lm, json=body, timeout=8)
+    r = post_chat(lm, json=body, timeout=8)
     r.raise_for_status()
     txt = (r.json()["choices"][0]["message"]["content"] or "").strip()
     line = txt.splitlines()[0].strip() if txt else ""
@@ -1247,7 +1248,8 @@ def inspect(helper: str, state: dict, reason: str) -> dict:
         raise RuntimeError("vision helper not configured")
     result = subprocess.run([sys.executable, helper], input=json.dumps({"state": state,
                             "reason": reason}), text=True, capture_output=True,
-                            timeout=12, check=True)
+                            timeout=12, check=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     value = json.loads(result.stdout)
     stamp = number(value.get("t"), 0)
     caption = value.get("caption")
@@ -1277,7 +1279,15 @@ def main() -> int:
     ap.add_argument("--landmark-map", default="", help="verified map provenance for legacy greg_landmarks.json; blank ignores it")
     ap.add_argument("--no-social", action="store_true", help="disable independent spontaneous/casual chat")
     ap.add_argument("--chat-memory", default="", help="per-player conversation memory; default beside collector")
+    ap.add_argument("--model-min-tokens", type=int, default=0, help="opt-in minimum output budget, including reasoning")
+    ap.add_argument("--model-timeout", type=float, default=8, help="local model request timeout seconds (maximum 120)")
+    ap.add_argument("--model-reasoning", choices=("default", "off"), default="default", help="use model default or request reasoning off (LM Studio)")
     a = ap.parse_args()
+    from greg_model import configure
+    try:
+        configure(a.model_min_tokens, a.model_timeout, a.model_reasoning)
+    except ValueError as exc:
+        ap.error(str(exc))
     CHAT_MEMORY = ChatMemory(a.chat_memory or str(Path(__file__).resolve().parent / "greg_chat_memory.json"))
     if a.playercore:
         graph = NavGraph.load(a.nav or str(Path(a.data) / "greg" / "navdump.json"), a.waypoints)
@@ -1453,6 +1463,7 @@ def main() -> int:
             if future is not None and future.done():
                 try:
                     result = future.result()
+                    log(f"INFERENCE_RESULT kind={pending_kind} latency={now-pending_at:.2f} valid={valid} context_match={pending_context==context}")
                     if PLAYERCORE is not None and pending_kind == "model":
                         log("MODEL_RESULT " + json.dumps(result)[:800] + " cursor=" + str(getattr(PLAYERCORE,"explore_cursor",None)) + " valid=" + str(valid) + " context_match=" + str(pending_context==context) + " latency=" + str(now-pending_at))
                     if valid and pending_context == context:
@@ -1466,7 +1477,11 @@ def main() -> int:
                             else:
                                 log("goal pick empty; keeping %r" % intent.self_goal)
                             intent.self_at = now
-                        elif now - pending_at <= 10:
+                        # An agenda choice is semantic, not a stale movement command.
+                        # Agenda.accept revalidates map/session/epoch and live catalog
+                        # IDs; local navigation plans from the CURRENT state. Keep
+                        # the original 10s limit for state-dependent action replies.
+                        elif now - pending_at <= (max(10, a.model_timeout) if pending_kind == "agenda" else 10):
                             ready = result  # split reply/action once, below
                 except Exception as exc:
                     if PLAYERCORE is not None: PLAYERCORE.needs_brain = True
