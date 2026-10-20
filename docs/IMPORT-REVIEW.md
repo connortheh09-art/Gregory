@@ -68,3 +68,26 @@ main stays unchanged until the baseline and launch contract are established.
 SSH deploy keys support git operations but do not by themselves provide GitHub
 API authentication for creating a pull request. The supplied `/pull/new/` URL is
 a creation form, not evidence of an opened PR.
+
+## Follow-up: 5312988
+
+Verified from the fetched tree: the RCON literal is replaced by an environment
+variable, the manifest contains full hash strings, the rig/old-PC scope gap is
+explicit, and the environment template is tracked. These close the literal-secret,
+truncated-hash, and missing-template findings only; no live hash comparison was made.
+
+Current twin node status reports KELLENWORKSPACE paired but disconnected. No
+remote capture or current process check was possible. Last-known source locations:
+`C:\Users\lesle\openclaw\gmod_bridge.py`,
+`C:\Users\lesle\openclaw\greg_playercore.py`, and
+`C:\Users\lesle\openclaw\greg_goal_lifecycle.py`.
+These are historical paths, not fresh deployment evidence.
+
+For the rig launchers, the source explicitly references `findproc.ps1`,
+`killproc.ps1`, and `killgdiscord.ps1`; retrieve those exact helpers and trace
+calls rather than substituting similarly named scripts. Prefer explicit configured
+paths with checkout-relative defaults to compatibility shims, and require the
+launched script/working directory to agree on runtime flag and token locations.
+A template alone is not environment loading: document how values are exported.
+Keep Minecraft-era tools under a clearly labelled legacy boundary, not the GMod
+startup path. Current deployment provenance and launcher closure remain open.
