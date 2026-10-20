@@ -23,9 +23,11 @@ import requests
 
 STATE_URL = "http://127.0.0.1:18090/state"
 PUSH_URL = os.environ.get("PUSH_URL", "http://127.0.0.1:18083/respawn_cam.txt")
-LOG = Path(r"C:\Users\Conman\Downloads\openclaw\respawn_cam.log")
+LOG = Path(os.environ.get("RESPAWN_LOG", "respawn_cam.log"))
 
-RCON_HOST, RCON_PORT, RCON_PASS = "127.0.0.1", 25575, "openclawmc"
+RCON_HOST = os.environ.get("RCON_HOST", "127.0.0.1")
+RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
+RCON_PASS = os.environ.get("RCON_PASS", "")
 WATCHER = "kailey_idk"
 TARGET = "Greg2"
 CMD = "execute as %s at @s run spectate %s" % (WATCHER, TARGET)
