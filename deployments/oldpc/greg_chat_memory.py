@@ -26,18 +26,30 @@ class ChatMemory:
         try:
             if self.path.stat().st_size<=1_000_000:
                 raw=json.loads(self.path.read_text(encoding='utf8'))
-                if raw.get('version')==1 and isinstance(raw.get('threads'),dict):
-                    self.threads={k:v for k,v in raw['threads'].items() if isinstance(v,dict) and isinstance(v.get('turns'),list)}
+                if isinstance(raw,dict) and raw.get('version')==1 and isinstance(raw.get('threads'),dict):
+                    for key,value in raw['threads'].items():
+                        if not isinstance(value,dict) or not isinstance(value.get('turns'),list):continue
+                        thread=dict(value)
+                        thread['turns']=[dict(turn,content=turn['content'][:600])
+                            for turn in value['turns'] if isinstance(turn,dict)
+                            and turn.get('role') in {'user','assistant'}
+                            and isinstance(turn.get('content'),str)][-24:]
+                        used=thread.get('last_used',0)
+                        thread['last_used']=used if isinstance(used,(int,float)) and math.isfinite(used) else 0
+                        self.threads[key]=thread
+                    self._prune()
         except (OSError,ValueError,AttributeError):pass
     def thread(self,map_name,sid):
         # SteamID, NOT nickname; same names do not merge people's conversations.
         key=str(map_name)+'|'+str(sid)
         if key not in self.threads:self.threads[key]={'turns':[],'last_used':0}
         return self.threads[key]
-    def save(self):
+    def _prune(self):
         if len(self.threads)>32:
             keep=sorted(self.threads,key=lambda k:self.threads[k].get('last_used',0),reverse=True)[:32]
             self.threads={k:self.threads[k] for k in keep}
+    def save(self):
+        self._prune()
         try:
             self.path.parent.mkdir(parents=True,exist_ok=True)
             tmp=self.path.with_suffix(self.path.suffix+'.tmp')

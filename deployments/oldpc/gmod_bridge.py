@@ -1527,7 +1527,7 @@ def main() -> int:
                     PLAYERCORE.needs_brain = False
                     future = worker.submit(agenda.decide, dict(latest, navigation_available=latest.get("map")==PLAYERCORE.graph.map),
                                            list(PLAYERCORE.memory.landmarks(latest.get("map", ""))),
-                                           list(PLAYERCORE.memory.tail)[-12:])
+                                           PLAYERCORE.memory.recent_events(latest.get("map", ""), 12))
                     pending_context, pending_at, pending_kind = context, now, "agenda"
                 else:
                     future = worker.submit(ask, a.lm, model, goal, dict(latest), mode, vision,

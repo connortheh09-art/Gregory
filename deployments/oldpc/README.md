@@ -12,6 +12,10 @@ preserves the installed relative paths, including client/server autorun files.
 
 ## Provenance and changes
 
+The import description below refers to the original snapshot. Subsequent memory
+and decision improvements, offline checks, and remaining runtime acceptance are
+documented in [MEMORY-IMPROVEMENTS.md](../../docs/MEMORY-IMPROVEMENTS.md).
+
 `SOURCE-MANIFEST.json` records original absolute paths, exact original mtimes,
 byte counts, full original SHA-256 and imported SHA-256 for all 15 files.
 Both transfer archives and every member were verified locally against the

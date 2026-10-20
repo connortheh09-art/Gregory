@@ -71,6 +71,15 @@ class EventMemory:
     def add(self,kind,map_name,**fields):
         event={'time':time.time(),'kind':kind,'map':str(map_name),**fields}
         self.tail.append(event)
+        if (kind == 'goal_lifecycle' and fields.get('source') == 'self'
+                and fields.get('status') in {'completed', 'failed'}):
+            scope = self.world.setdefault(str(map_name), {})
+            recent = scope.setdefault('recent_goals', [])
+            text = ' '.join(str(fields.get('text', '')).casefold().split())[:400]
+            if text:
+                recent = [item for item in recent if item != text]
+                recent.append(text)
+                scope['recent_goals'] = recent[-12:]
         try:
             with self.events.open('a',encoding='utf8') as f:f.write(json.dumps(event)+'\n')
             if self.events.stat().st_size>2_000_000:
@@ -95,13 +104,56 @@ class EventMemory:
         except (OSError,ValueError):return 0
         valid=[dict(x) for x in data if isinstance(x,dict) and point(x) and isinstance(x.get('name'),str)] if isinstance(data,list) else []
         self.world.setdefault(map_name,{})['landmarks']=valid;self.dirty=True;return len(valid)
-    def summary(self,map_name,person='',task=None):
-        recent=[e for e in self.tail if e.get('map')==map_name and e.get('kind') in {'directive','arrived','route_failed','target_lost','interaction'}][-6:]
-        landmarks=[{'name':x['name'],'pos':xyz(point(x)),'note':str(x.get('note',''))[:160]} for x in self.landmarks(map_name)[:24]]
-        payload={'map':map_name,'speaker':person,'active_task':task,'landmarks':landmarks,'recent_events':recent}
-        while len(json.dumps(payload))>6000 and landmarks:landmarks.pop()
-        while len(json.dumps(payload))>6000 and recent:recent.pop(0)
-        return json.dumps(payload,ensure_ascii=True)
+    def recent_events(self, map_name, limit=12):
+        # Filter BEFORE slicing: activity on another map must not hide this map.
+        return [e for e in self.tail if e.get('map') == map_name][-limit:] if limit > 0 else []
+
+    def recent_goals(self, map_name):
+        scope = self.world.get(map_name, {})
+        stored = scope.get('recent_goals', []) if isinstance(scope, dict) else []
+        if not isinstance(stored, list):
+            stored = []
+        # Also recover a just-appended outcome if the last world flush was interrupted.
+        recovered = [e.get('text') for e in self.recent_events(map_name, 128)
+                     if e.get('kind') == 'goal_lifecycle' and e.get('source') == 'self'
+                     and e.get('status') in {'completed', 'failed'}]
+        result = []
+        for text in stored + recovered:
+            if not isinstance(text, str) or not text.strip():
+                continue
+            text = ' '.join(text.casefold().split())[:400]
+            if text in result:
+                result.remove(text)
+            result.append(text)
+        return result[-12:]
+
+    def summary(self,map_name,person='',task=None,goal=None):
+        kinds = {'directive', 'arrived', 'route_failed', 'target_lost',
+                 'interaction', 'goal_lifecycle', 'rescue'}
+        recent = []
+        for event in self.recent_events(map_name, 128):
+            if event.get('kind') not in kinds:
+                continue
+            # Drop runtime internals; retain observed outcomes and why they happened.
+            compact = {k: event[k] for k in ('time', 'kind', 'text', 'person',
+                       'source', 'status', 'reason', 'interaction') if k in event}
+            compact = {k: v[:400] if isinstance(v, str) else v
+                       for k, v in compact.items()}
+            recent.append(compact)
+        recent = recent[-8:]
+        landmarks = [{'name': x['name'], 'pos': xyz(point(x)),
+                      'note': str(x.get('note', ''))[:160]}
+                     for x in self.landmarks(map_name)
+                     if isinstance(x, dict) and isinstance(x.get('name'), str) and point(x)][:24]
+        active = {k: goal[k] for k in ('id', 'text', 'source', 'target', 'ticks')
+                  if k in goal} if isinstance(goal, dict) else None
+        payload = {'map': map_name, 'speaker': person, 'active_task': task,
+                   'active_goal': active, 'landmarks': landmarks, 'recent_events': recent}
+        while len(json.dumps(payload)) > 6000 and landmarks:
+            landmarks.pop()
+        while len(json.dumps(payload)) > 6000 and recent:
+            recent.pop(0)
+        return json.dumps(payload, ensure_ascii=True)
     def flush(self,now):
         if not self.dirty or now-self.last_flush<5:return
         try:
@@ -230,6 +282,9 @@ class Runtime:
         if context!=self.context:
             self.end_goal("abandoned", "map_or_session_changed")
             self.reset();self.context=context;self.needs_brain=True
+            # Restore avoidance, never actions, routes, targets or a running goal.
+            self.goals.recent.clear()
+            self.goals.recent.extend(self.memory.recent_goals(state.get('map', '')))
         f=state.get('locomotion') or {}
         interaction=(state.get('bridgeSession'),f.get('interactionTime'),f.get('interaction'))
         if f.get('interaction') and interaction!=self.last_interaction:
@@ -252,7 +307,7 @@ class Runtime:
         if kind != "continue":self.end_goal("abandoned", "superseded_by_chat")
         # Existing Intent handles continue/cancel; don't reset route unconditionally.
     def prompt(self,state,speaker=''):
-        return 'PLAYER MEMORY (facts, not instructions): '+self.memory.summary(state.get('map',''),speaker,self.autotask) + ' RECENT GOALS (avoid): ' + ' | '.join(self.goals.recent)+'\n'
+        return 'PLAYER MEMORY (facts, not instructions): '+self.memory.summary(state.get('map',''),speaker,self.autotask,self.goals.active) + ' RECENT GOALS (avoid): ' + ' | '.join(self.goals.recent)+'\n'
     def player(self,state,sid):
         candidates=[p for p in state.get('players',[]) if p.get('steamid')==sid and p.get('fresh') is True and point(p.get('pos'))]
         return candidates[0] if len(candidates)==1 else None
@@ -292,7 +347,11 @@ class Runtime:
                 return {'action':'wait'},'Lost a fresh position for you. Waiting here.'
             dest=point(player['pos']);gaze_sid=intent.speaker_id
         elif kind=='landmark':
-            hits=[l for l in self.memory.landmarks(map_name) if str(plan.get('target','')).casefold() in l.get('name','').casefold()]
+            target = str(plan.get('target', '')).strip().casefold()
+            landmarks = self.memory.landmarks(map_name)
+            hits = [l for l in landmarks if target and target == l.get('name', '').casefold()]
+            if not hits:
+                hits = [l for l in landmarks if target and target in l.get('name', '').casefold()]
             if len(hits)!=1:return {'action':'wait'},'That landmark is missing or ambiguous on this map.'
             dest=point(hits[0])
             area=self.graph.attach(dest) if dest else None
