@@ -253,14 +253,20 @@ class NavGraph:
 
 
 class Runtime:
-    def __init__(self,graph,memory):
+    def __init__(self,graph,memory,*,observer=None):
+        self.observer=observer
         self.speech=deque();self.committed_id=None;self.target_failures={};self.failure_context=None
         self.goals=Goals(self.goal_event)
         self.graph=graph;self.memory=memory;self.gate=StateGate();self.route=None;self.route_id=''
         self.context=None;self.task_key=None;self.destination=None;self.failures=0;self.failed=False
         self.last_plan=-math.inf;self.replan_after=0;self.last_feedback=None;self.autotask=None
         self.rescue_eligible=False;self.needs_brain=True;self.wake_at=math.inf;self.events=deque(maxlen=8);self.last_interaction=None;self.last_rescue=None
+    def _notify(self,event):
+        if self.observer is not None:
+            try:self.observer(event)
+            except Exception:pass
     def goal_event(self, event):
+        self._notify(dict(event,kind='goal'))
         self.memory.add('goal_lifecycle', event.get('map',''), **{k:v for k,v in event.items() if k!='map'})
         event=dict(event,wall=time.time(),mono=time.monotonic())
         if event.get('status') in {'failed','abandoned'}:
@@ -277,6 +283,7 @@ class Runtime:
         self.failed=False;self.rescue_eligible=False;self.needs_brain=True
     def observe(self,state,actor,wall,now):
         if not self.gate.accept(state,actor,wall):return False
+        self._notify({'kind':'state','state':state})
         context=(state.get('map'),state.get('bridgeSession'),state.get('controlEpoch'))
         if context!=self.failure_context:self.target_failures.clear();self.failure_context=context
         if context!=self.context:
@@ -379,6 +386,7 @@ class Runtime:
                 return {'action':'wait','rescueEligible':True},'No connected walking route to that position.'
             self.route_id=uuid.uuid4().hex[:12];self.destination=dest;self.last_plan=now
             self.memory.add('route_planned',map_name,id=self.route_id,areas=self.route['areas'],target=xyz(dest))
+            self._notify({'kind':'route','id':self.route_id,'target':xyz(dest),'status':'planned'})
             if self.goals.active:
                 g=self.goals.active;g['target']=dest
                 length=sum(distance(a,b) for a,b in zip([own]+self.route['points'],self.route['points']))

@@ -65,6 +65,7 @@ class Storage(unittest.TestCase):
         # Emulate absence of a committed orderly termination after a crash.
         with sqlite3.connect(self.path) as db:
             db.execute('UPDATE runs SET ended_at_utc=NULL,end_reason=NULL')
+            db.execute("UPDATE experiences SET record_state='open',closure_reason=NULL,terminal_event_id=NULL")
         second=self.recorder();second.close()
         with open_reader(self.path) as db:
             e=get_experience(db,trace.correlation_id)
@@ -89,6 +90,54 @@ class Storage(unittest.TestCase):
         with open_reader(self.path) as db:
             rows=[v for v in read_events(db)['events'] if v['event_id']==e.as_dict()['event_id']]
             self.assertTrue(not rows or rows[0]['payload']['count']==1)
+
+    def test_actual_process_exit_after_commit_is_recovered_unknown(self):
+        module_path=str(Path(__file__).resolve().parents[1]/'deployments'/'oldpc')
+        script='''import sys,os,time,json
+sys.path.insert(0,sys.argv[1])
+from greg_recorder import Recorder,open_reader,get_experience
+from greg_events import TraceContext,new_id
+r=Recorder(sys.argv[2],'crash');r.wait_ready()
+t=TraceContext(r.run_id,new_id(),decision_id=new_id())
+r.record('decision.requested',{},trace=t,priority='critical')
+for _ in range(200):
+    with open_reader(sys.argv[2]) as db: found=get_experience(db,t.correlation_id)
+    if found: break
+    time.sleep(.01)
+else: raise RuntimeError('commit not observed')
+print(t.correlation_id,flush=True)
+os._exit(0)
+'''
+        child=subprocess.run([sys.executable,'-c',script,module_path,str(self.path)],capture_output=True,text=True,timeout=5)
+        self.assertEqual(child.returncode,0,child.stderr)
+        cid=child.stdout.strip()
+        r=self.recorder();r.close()
+        with open_reader(self.path) as db:
+            result=get_experience(db,cid)
+            self.assertEqual(result['world_outcome'],'unknown')
+            self.assertEqual(result['closure_reason'],'unclean_restart')
+
+    def test_untrusted_envelope_cannot_bypass_payload_privacy(self):
+        r=self.recorder();e=r.factory.make('run.heartbeat',{})
+        value=e.as_dict();value['payload']['headers']={'Authorization':'secret'}
+        self.assertEqual(r.emit(Event(json.dumps(value))),'invalid')
+        r.close()
+        self.assertNotIn(b'secret',self.path.read_bytes())
+
+    def test_runtime_database_error_does_not_block_admission(self):
+        r=self.recorder(normal_limit=3)
+        from unittest.mock import patch
+        with patch.object(r,'_transaction',side_effect=sqlite3.OperationalError('fixture full')):
+            r.record('run.heartbeat',{})
+            until=time.monotonic()+1
+            while r.health()['errors']==0 and time.monotonic()<until: time.sleep(.01)
+            started=time.monotonic()
+            for _ in range(30): r.record('run.heartbeat',{})
+            self.assertLess(time.monotonic()-started,.25)
+            self.assertGreater(r.health()['errors'],0)
+            self.assertLessEqual(r.health()['normal_depth'],3)
+            self.assertGreater(r.health()['dropped'],0)
+            r.close(deadline_seconds=.05)
 
 
 if __name__=='__main__': unittest.main()

@@ -4,6 +4,12 @@ The token cap includes private reasoning, not just the final answer. Defaults
 preserve the original request limits; configure before starting worker threads.
 """
 import math
+import time
+
+try:
+    from greg_events import observed as _observed
+except Exception:  # Optional instrumentation must not prevent collector startup.
+    def _observed(*args, **kwargs): pass
 
 _min_tokens = 0
 _timeout = 8.0
@@ -29,4 +35,23 @@ def post_chat(url, *, json, timeout=8):
     if _reasoning == 'off':
         # Verified against this deployment's LM Studio Chat Completions endpoint.
         body['reasoning_effort'] = 'none'
-    return requests.post(url, json=body, timeout=max(timeout, _timeout))
+    started = time.monotonic()
+    _observed('decision.requested', {'model': body.get('model'), 'settings': {
+        k: body[k] for k in ('max_tokens', 'temperature') if k in body}})
+    try:
+        response = requests.post(url, json=body, timeout=max(timeout, _timeout))
+    except Exception as exc:
+        _observed('decision.error', {'error_category': type(exc).__name__,
+                                    'latency_ms': (time.monotonic()-started)*1000})
+        raise
+    try:
+        value = response.json()
+        choice = (value.get('choices') or [{}])[0]
+        _observed('decision.response', {'model': body.get('model'), 'returned_model': value.get('model'),
+            'finish_reason': choice.get('finish_reason'), 'usage': value.get('usage', {}),
+            'content': (choice.get('message') or {}).get('content'),
+            'latency_ms': (time.monotonic()-started)*1000})
+    except Exception:
+        _observed('decision.response', {'model': body.get('model'), 'parse_status': 'unavailable',
+                                      'latency_ms': (time.monotonic()-started)*1000})
+    return response

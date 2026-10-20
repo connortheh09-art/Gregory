@@ -84,7 +84,7 @@ class Recorder:
         self.run_id, self.session_id = new_id(), session_id
         self.factory = EventFactory(self.run_id, session_id, text=text)
         self.retention_days, self.max_bytes = retention_days, max_mib * 1024 * 1024
-        self._connect, self._build = connect, build or {}
+        self._connect, self._build = connect, sanitize(build or {})
         self._queues = {'normal': deque(), 'critical': deque()}
         self._limits = {'normal': normal_limit, 'critical': critical_limit}
         self._cv = threading.Condition()
@@ -109,7 +109,7 @@ class Recorder:
         try:
             if not isinstance(event, Event): raise ValueError('expected frozen event')
             value = event.as_dict()
-            validate_event(value)
+            event = validate_event(value)
             if value['payload'] != sanitize(value['payload'], visible=self.factory.visible):
                 raise ValueError('event payload bypassed privacy contract')
             if value['run_id'] != self.run_id or value['session_id'] != self.session_id:
@@ -186,6 +186,10 @@ class Recorder:
             db.execute('INSERT OR IGNORE INTO links VALUES(?,?,?,?)', (v['event_id'], 'observation', ref, 'event'))
         if v['causation_id']:
             db.execute('INSERT OR IGNORE INTO links VALUES(?,?,?,?)', (v['event_id'], 'caused_by', v['causation_id'], 'event'))
+        for link in v['payload'].get('links',[]):
+            if isinstance(link,dict) and set(link) >= {'relation','to_id','to_kind'}:
+                db.execute('INSERT OR IGNORE INTO links VALUES(?,?,?,?)',
+                           (v['event_id'],link['relation'],link['to_id'],link['to_kind']))
         p, correlation = v['payload'], v['correlation_id']
         if correlation:
             db.execute('''INSERT OR IGNORE INTO experiences VALUES(?,?,?,?,?,?,?,?,?,?)''',
@@ -200,6 +204,8 @@ class Recorder:
         if v['event_type'] == 'run.ended':
             db.execute('UPDATE runs SET ended_at_utc=?,end_reason=? WHERE run_id=?',
                        (v['received_at_utc'], 'orderly', v['run_id']))
+            db.execute("UPDATE experiences SET record_state='closed',closure_reason='orderly_shutdown',world_outcome='unknown',verdict='inconclusive',terminal_event_id=? WHERE run_id=? AND record_state='open'",
+                       (v['event_id'],v['run_id']))
         return True
 
     def _transaction(self, db, batch, *, startup=False):
@@ -268,6 +274,7 @@ class Recorder:
                 with self._cv: self._stats['status'] = 'ready'
                 self._ready.set()
                 maintained = health_at = 0.0
+                error_log_at = -10**20
                 served = 0
                 reported_loss = 0
                 while True:
@@ -302,6 +309,10 @@ class Recorder:
                             self._stats['errors'] += 1; self._stats['status'] = 'degraded'
                             self._stats['last_error'] = type(exc).__name__
                             closing = self._closing
+                        # Fixed category only: never exception text, SQL or event content.
+                        if time.monotonic()-error_log_at >= 5:
+                            print('[greg recorder] degraded: ' + type(exc).__name__, file=__import__('sys').stderr, flush=True)
+                            error_log_at=time.monotonic()
                         if closing: break
                         # Writer-only backoff; admissions remain bounded and nonblocking.
                         with self._cv: self._cv.wait(.5)
@@ -315,6 +326,7 @@ class Recorder:
             with self._cv:
                 self._stats['status'] = 'degraded'; self._stats['errors'] += 1
                 self._stats['last_error'] = type(exc).__name__
+            print('[greg recorder] unavailable: ' + type(exc).__name__, file=__import__('sys').stderr, flush=True)
         finally:
             self._ready.set()
             if db is not None: db.close()
@@ -347,16 +359,20 @@ def read_events(db, *, after=0, limit=100, max_bytes=1048576):
 def get_experience(db, correlation_id):
     row = db.execute('SELECT * FROM experiences WHERE correlation_id=?', (correlation_id,)).fetchone()
     if row is None: return None
-    events = [json.loads(r[0]) for r in db.execute('SELECT envelope_json FROM events WHERE correlation_id=? ORDER BY ingest_sequence', (correlation_id,))]
+    events = [json.loads(r[0]) for r in db.execute('''SELECT envelope_json FROM events WHERE correlation_id=? OR event_id IN
+                (SELECT from_event_id FROM links WHERE to_id=? AND to_kind='correlation') ORDER BY ingest_sequence''', (correlation_id,correlation_id))]
     refs = {ref for event in events for ref in event['observation_ids']}
+    refs.update(e['causation_id'] for e in events if e['causation_id'])
     evidence, missing = [], []
     for ref in refs:
         record = db.execute('SELECT envelope_json FROM events WHERE event_id=?', (ref,)).fetchone()
         if record: evidence.append(json.loads(record[0]))
         else: missing.append(ref)
-    result = dict(row); result.update(events=events, observations=evidence, unresolved_refs=sorted(missing))
-    kinds = {e['event_type'] for e in events}
-    result['trace_complete'] = not missing and {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'} <= kinds
+    result = dict(row); result.update(events=events, observations=[e for e in evidence if e['event_type']=='observation.accepted'], unresolved_refs=sorted(missing))
+    primary = [e for e in events if e['correlation_id']==correlation_id]
+    kinds = {e['event_type'] for e in primary}
+    has_exact_action = any(e['event_type']=='action.dispatch' and e['payload'].get('parameters_complete') for e in primary)
+    result['trace_complete'] = not missing and has_exact_action and {'decision.requested','decision.applied','action.dispatch','controller.feedback','outcome.evaluated','experience.closed'} <= kinds
     return result
 
 

@@ -49,6 +49,7 @@ CATALOG = None
 
 CHAT_MEMORY = None
 PLAYERCORE = None
+_COMMAND_OBSERVER = None
 
 PORT_NOTE = "file transport (no listener)"
 
@@ -1037,11 +1038,20 @@ def p0_trace(payload,state):
     except Exception as exc:log('TRACE_ERROR '+str(exc))
 
 def write_cmd(path: Path, seq: int, action: dict, state: dict,
-              session: str, mode: str) -> None:
+              session: str, mode: str, *, observer=None) -> None:
+    notify = observer if observer is not None else _COMMAND_OBSERVER
+    def report(status, payload=None, reason='', retries=0):
+        if notify is not None:
+            try:
+                notify(payload or {'seq':seq,'session':session,'action':dict(action)},
+                       write_result=status,reason=reason,retries=retries)
+            except Exception: pass
     action = dict(action)
     if action.get("action") == "say":
         text = dialogue(action.get("text"))
-        if not text:return
+        if not text:
+            report("suppressed",reason="invalid_speech")
+            return
         action["text"] = text
     if isinstance(action.get("speech"),dict):
         text = dialogue(action["speech"].get("text"))
@@ -1053,6 +1063,7 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
     speech_text = action.get("speech", {}).get("text") if isinstance(action.get("speech"), dict) else None
     if action.get("action") == "say" and not SPEECH.allowed(action.get("text", ""), state, time.monotonic()):
         log("SAY_SUPPRESSED duplicate/state-unchanged: %r" % action.get("text"))
+        report("suppressed",reason="speech_dedup")
         return
     tmp = path.with_suffix(".json.tmp")
     payload = {"seq": seq, "action": action, "t": time.time(),
@@ -1071,6 +1082,7 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
             if action.get("action") == "say" or speech_text: SPEECH.commit(speech_text or action.get("text", ""), state, time.monotonic())
             LAST_WRITE["t"] = time.time()
             p0_trace(payload,state)
+            report("written",payload,retries=_)
             return
         except OSError as exc:
             last = exc
@@ -1079,6 +1091,7 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
             if action.get("action") == "say" or speech_text: SPEECH.commit(speech_text or action.get("text", ""), state, time.monotonic())
             LAST_WRITE["t"] = time.time()
             p0_trace(payload,state)
+            report("written",payload,retries=_)
             try:
                 tmp.unlink()
             except OSError:
@@ -1088,6 +1101,7 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
             last = exc
         time.sleep(0.12)
     log("cmd write failed after retries (dropped tick): %r" % (last,))
+    report("failed",payload,reason="write_retries_exhausted",retries=6)
 
 
 DIRECTIONS = ("forward", "right", "back", "left")
@@ -1258,8 +1272,16 @@ def inspect(helper: str, state: dict, reason: str) -> dict:
     return {"caption": caption[:2000], "t": stamp}
 
 
+def source_manifest():
+    import hashlib
+    root = Path(__file__).resolve().parent
+    files = [{'id':p.name, 'version':hashlib.sha256(p.read_bytes()).hexdigest()}
+             for p in sorted(root.glob('*.py'))]
+    return {'files':files[:32], 'build_commit':'unknown', 'base_commit':'194ed3d2841a72ed1c2915f32d470f09d7f352a9'}
+
+
 def main() -> int:
-    global PLAYERCORE, CHAT_MEMORY
+    global PLAYERCORE, CHAT_MEMORY, _COMMAND_OBSERVER
     log("P0_MODULES bridge="+__file__+" playercore="+__import__("greg_playercore").__file__)
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=r"C:\Program Files (x86)\Steam\steamapps\common\GarrysMod\garrysmod\data")
@@ -1282,7 +1304,14 @@ def main() -> int:
     ap.add_argument("--model-min-tokens", type=int, default=0, help="opt-in minimum output budget, including reasoning")
     ap.add_argument("--model-timeout", type=float, default=8, help="local model request timeout seconds (maximum 120)")
     ap.add_argument("--model-reasoning", choices=("default", "off"), default="default", help="use model default or request reasoning off (LM Studio)")
+    ap.add_argument("--recorder", action="store_true", help="opt-in passive SQLite experience recording")
+    ap.add_argument("--recorder-db", default="", help="local recorder DB path; requires --recorder")
+    ap.add_argument("--recorder-text", choices=("metadata","visible"), default="metadata")
+    ap.add_argument("--recorder-retention-days", type=int, default=7)
+    ap.add_argument("--recorder-max-mib", type=int, default=1024)
     a = ap.parse_args()
+    if a.recorder and (not 1 <= a.recorder_retention_days <= 365 or not 1 <= a.recorder_max_mib <= 102400):
+        ap.error("invalid recorder retention/budget")
     from greg_model import configure
     try:
         configure(a.model_min_tokens, a.model_timeout, a.model_reasoning)
@@ -1321,6 +1350,30 @@ def main() -> int:
     social = SocialLane(a.lm, model, enabled=not a.no_social)
     social_ready = None
     session, seq = uuid.uuid4().hex, 0
+    recorder = tracker = None
+    run_traced = None
+    _COMMAND_OBSERVER = None
+    if a.recorder:
+        try:
+            from greg_recorder import Recorder
+            from greg_experience import ExperienceTracker, SafeTracker
+            from greg_events import run_traced
+            recorder = Recorder(a.recorder_db or str(Path(__file__).resolve().parent / 'greg_recorder' / 'experience.sqlite3'),
+                                session, text=a.recorder_text, retention_days=a.recorder_retention_days,
+                                max_mib=a.recorder_max_mib, build=source_manifest())
+            tracker = SafeTracker(ExperienceTracker(recorder))
+            def record_command(payload, **status):
+                speech_trace = social.last_returned_trace if payload.get('action',{}).get('speech') else None
+                tracker.dispatch(payload,speech_trace=speech_trace,**status)
+            _COMMAND_OBSERVER = record_command
+            if PLAYERCORE is not None: PLAYERCORE.observer = tracker.runtime_event
+            social.recorder_tracker = tracker
+            social.recorder_sink = recorder
+        except Exception as exc:
+            log('RECORDER_UNAVAILABLE ' + type(exc).__name__)
+            if recorder is not None: recorder.close(deadline_seconds=0)
+            recorder = tracker = None
+            _COMMAND_OBSERVER = None
     future, pending_context, pending_at, pending_kind = None, None, 0.0, ""
     pending_refresh = False
     ready, vision = None, None
@@ -1336,10 +1389,18 @@ def main() -> int:
     # One bounded worker: slow model/vision never blocks state/chat/reflex servicing.
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="greg-policy")
     threading.Thread(target=watchdog, name="greg-watchdog", daemon=True).start()
+    def submit_policy(kind, fn, *args):
+        nonlocal pending_trace
+        if tracker is None:
+            return worker.submit(fn, *args)
+        pending_trace = tracker.begin_decision(lane=kind, template_version=kind + '.v1')
+        return worker.submit(run_traced, pending_trace, recorder, fn, *args)
+    pending_trace = ready_trace = None
     log(f"watching {greg} (model={model}, target={target or 'first fresh player'})")
     try:
         while True:
             now = time.monotonic()
+            if tracker is not None: tracker.tick()
             for ln in state_tail.read_new():
                 try:
                     st = json.loads(ln)
@@ -1351,6 +1412,7 @@ def main() -> int:
                     if st.get("steamid") == target:
                         if PLAYERCORE is None or PLAYERCORE.observe(st, target, time.time(), now):
                             latest = st
+                            if tracker is not None and PLAYERCORE is None: tracker.accepted_state(st)
                 except (ValueError, TypeError):
                     continue
             me = (latest or {}).get("name", "")
@@ -1397,6 +1459,7 @@ def main() -> int:
                             log("SOCIAL non-preempting -> " + repr(incoming_text))
                             continue
                         intent.direct(user, incoming_text, now, rec["steamid"])
+                        if tracker is not None: tracker.directive(intent.version)
                         if PLAYERCORE is not None:
                             PLAYERCORE.directive(user, str(rec.get("msg", "")), (latest or {}).get("map", ""), now,
                                                  (literal(str(rec.get("msg", ""))) or {}).get("kind"))
@@ -1433,6 +1496,9 @@ def main() -> int:
             context = (target, (latest or {}).get("bridgeSession"),
                        (latest or {}).get("controlEpoch"), intent.version, mode == "chat")
             if context != previous_context or valid != was_actionable:
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace, accepted=False, reason='context_changed')
+                ready_trace = None
                 ready, vision = None, None
                 pending_say = None
                 command_due = 0
@@ -1469,6 +1535,9 @@ def main() -> int:
                     if valid and pending_context == context:
                         if pending_kind == "vision":
                             vision = result
+                            if tracker is not None:
+                                recorder.record('sensor.result', {'caption':result.get('caption'), 'captured_at':result.get('t')}, trace=pending_trace)
+                                tracker.decision_result(pending_trace, accepted=True, reason='sensor_ready')
                         elif pending_kind == "goal":
                             g = result if isinstance(result, str) else ""
                             if g.strip() and intent.goals.start(g, "self", latest, now):
@@ -1483,10 +1552,18 @@ def main() -> int:
                         # the original 10s limit for state-dependent action replies.
                         elif now - pending_at <= (max(10, a.model_timeout) if pending_kind == "agenda" else 10):
                             ready = result  # split reply/action once, below
+                            ready_trace = pending_trace
+                    if tracker is not None and pending_trace is not None:
+                        age_limit = max(10, a.model_timeout) if pending_kind == 'agenda' else 10
+                        if not valid or pending_context != context or (pending_kind not in {'vision','goal'} and now-pending_at > age_limit):
+                            tracker.decision_result(pending_trace, accepted=False, reason='stale_or_context')
                 except Exception as exc:
                     if PLAYERCORE is not None: PLAYERCORE.needs_brain = True
                     log(f"{pending_kind} unavailable: {exc}; API fallback remains live")
+                    if tracker is not None and pending_trace is not None:
+                        tracker.decision_result(pending_trace, accepted=False, reason='inference_error')
                 future = None
+                pending_trace = None
                 request_due = now + 1
 
             if not valid:
@@ -1514,9 +1591,13 @@ def main() -> int:
             if ready and ready.get("action") == "inspect":
                 if future is None and now >= vision_due and a.vision_helper:
                     reason = str(ready.get("reason", "describe appearance"))[:240]
-                    future = worker.submit(inspect, a.vision_helper, dict(latest), reason)
+                    future = submit_policy("vision", inspect, a.vision_helper, dict(latest), reason)
                     pending_context, pending_at, pending_kind = context, now, "vision"
                     vision_due = now + 10
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_inspect')
+                    tracker.close(ready_trace.correlation_id,'inspection_requested')
+                ready_trace = None
                 ready = None  # never send a collector tool to Lua
             cand = ready if isinstance(ready, dict) else None
             if cand is not None and isinstance(cand.get("action"), dict):
@@ -1525,6 +1606,10 @@ def main() -> int:
                 # Collector-only tool: the model writes a durable lesson about this spot.
                 record_lesson(cand, latest)
                 log("lesson stored: " + str(cand.get("text", ""))[:140])
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_note')
+                    tracker.close(ready_trace.correlation_id,'note_recorded')
+                ready_trace = None
                 ready = None
             if future is None and now >= request_due and (mode == "chat" or PLAYERCORE is None or now >= agenda.next_at) and not (mode == "chat" and (intent.plan or intent.answered)) and (PLAYERCORE is None or mode == "chat" or (not PLAYERCORE.goals.active and (PLAYERCORE.needs_brain or now >= agenda.reconsider_at))):
                 # Goal refresh gets its OWN call. Bundling it into the action prompt
@@ -1535,17 +1620,17 @@ def main() -> int:
                     not intent.self_goal
                 )
                 if need_goal and PLAYERCORE is None:
-                    future = worker.submit(pick_goal, a.lm, model, dict(latest),
+                    future = submit_policy("goal", pick_goal, a.lm, model, dict(latest),
                                            MEMORY.render(), list(intent.goals.recent), a.campaign)
                     pending_context, pending_at, pending_kind = context, now, "goal"
                 elif PLAYERCORE is not None and mode != "chat":
                     PLAYERCORE.needs_brain = False
-                    future = worker.submit(agenda.decide, dict(latest, navigation_available=latest.get("map")==PLAYERCORE.graph.map),
+                    future = submit_policy("agenda", agenda.decide, dict(latest, navigation_available=latest.get("map")==PLAYERCORE.graph.map),
                                            list(PLAYERCORE.memory.landmarks(latest.get("map", ""))),
                                            PLAYERCORE.memory.recent_events(latest.get("map", ""), 12))
                     pending_context, pending_at, pending_kind = context, now, "agenda"
                 else:
-                    future = worker.submit(ask, a.lm, model, goal, dict(latest), mode, vision,
+                    future = submit_policy("action", ask, a.lm, model, goal, dict(latest), mode, vision,
                                            False,
                                            (CHAT_MEMORY.history(latest.get("map", ""), intent.speaker_id, latest.get("bridgeSession", "")) if CHAT_MEMORY is not None else list(intent.history)[:-1]) if mode == "chat" else [],
                                            MEMORY.render() + lessons_text(latest) + (landmark_text(latest) if PLAYERCORE is None else "")
@@ -1565,6 +1650,9 @@ def main() -> int:
             if now >= command_due and pending_say is None:
                 reply = ""
                 activity_announcement = ""
+                if tracker is not None:
+                    tracker.scope_trace = ready_trace
+                recorder_proposal = ready
                 if mode == "chat" and intent.plan:
                     action, reply = direct_action(intent, latest)
                 elif ready is not None:
@@ -1648,19 +1736,28 @@ def main() -> int:
                     action = dict(action, speech={"id": session+":"+str(seq+1),
                                                   "text": social_ready[2]["text"]})
                     social_ready = None
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace, accepted=True, reason='existing_policy_evaluated',
+                                            parsed_summary=recorder_proposal or {})
                 seq += 1
                 write_cmd(cmd_path, seq, action, latest, session, mode)
                 MEMORY.open(action, latest, now, action.get("duration", interval), seq)
                 log(f"#{seq} {mode} goal={goal!r} -> {json.dumps(action)}")
+                if tracker is not None: tracker.scope_trace = None
+                ready_trace = None
                 command_due = now + (0.35 if social_sent else (action.get("duration", interval) if action["action"] == "move" else interval))
                 if a.turns and seq >= a.turns:
                     return 0
             time.sleep(0.1)
     finally:
+        if tracker is not None: tracker.scope_trace = None
         if latest and target:
             write_cmd(cmd_path, seq + 1, {"action": "wait"}, latest, session, "stop")
         worker.shutdown(wait=False, cancel_futures=True)
         social.close()
+        if tracker is not None: tracker.shutdown()
+        _COMMAND_OBSERVER = None
+        if recorder is not None: recorder.close(deadline_seconds=2.0)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ class SocialLane:
         self.next_at = 0
         self.last_text = ''
         self.current_context = None
+        self.recorder_tracker = self.recorder_sink = None
+        self.pending_trace = self.last_returned_trace = None
 
     @staticmethod
     def is_conversation(text):
@@ -72,13 +74,23 @@ class SocialLane:
                     self.last_text = text
                     self.future = None
                     self.next_at = now + random.uniform(30, 75)
+                    if self.recorder_tracker is not None:
+                        self.recorder_tracker.decision_result(self.pending_trace,accepted=True,reason='social_ready')
+                        self.last_returned_trace=self.pending_trace
                     return {'action':'say', 'text':text}
             except Exception as exc:
                 print('[greg social] unavailable: ' + str(exc)[:350], flush=True)
+            if self.recorder_tracker is not None and self.pending_trace is not None:
+                self.recorder_tracker.decision_result(self.pending_trace,accepted=False,reason='social_discarded')
             self.future = None
         if self.enabled and allowed and self.future is None and now >= self.next_at:
             self.pending, self.started = ctx, now
-            self.future = self.worker.submit(self._ask, dict(state), list(self.messages))
+            if self.recorder_tracker is not None:
+                from greg_events import run_traced
+                self.pending_trace=self.recorder_tracker.begin_decision(lane='social',template_version='social.v1')
+                self.future=self.worker.submit(run_traced,self.pending_trace,self.recorder_sink,self._ask,dict(state),list(self.messages))
+            else:
+                self.future = self.worker.submit(self._ask, dict(state), list(self.messages))
             self.next_at = now + random.uniform(30, 75)
         return None
 

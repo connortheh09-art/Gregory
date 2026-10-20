@@ -24,9 +24,9 @@ _SCOPE = ContextVar('greg_recorder_trace', default=None)
 _UNSAFE = re.compile(r'(?i)(?:<\s*/?\s*(?:think|analysis|reasoning)\b|\b(?:authorization|bearer|password|api[_ -]?key|token)\s*[:= ]|\bsk-[a-z0-9]{12,}|\bgh[pousr]_[a-z0-9]{12,}|-----BEGIN .*PRIVATE KEY|https?://)')
 _TEXT = frozenset(('text', 'content', 'caption', 'reply', 'announcement', 'native_text', 'cmd'))
 _STRINGS = frozenset('''action id kind source status reason origin lane template_version model returned_model
-provider finish_reason parse_status write_status write_method mode native_route_id native_goal_id
+provider finish_reason parse_status write_status write_method mode native_route_id native_goal_id activity landmark
 command_session dispatch_id controller_version traversal evaluator closure_reason world_outcome verdict
-coverage continuation_of related_to interaction bridgeSession map_name actor_id build_commit python_version
+coverage continuation_of related_to interaction bridgeSession map_name actor_id build_commit base_commit python_version
 sqlite_version error_category record_state relation to_id to_kind observation_id pre_observation_id
 goal_id action_id decision_id correlation_id source_instance_id version native_status label'''.split())
 _NUMBERS = frozenset('''x y z radius duration lease hold taps yaw pitch turn throttle steer zoom t seq
@@ -42,7 +42,7 @@ parameters_complete content_omitted truncated json_valid accepted context_match 
 owned timed_out recording_enabled loaded is_final addressed consent_granted'''.split())
 _CONTAINERS = frozenset('''action pos target points locomotion rescue capabilities clearance nearby players
 velocity ang eye usage settings parsed proposal control fields losses build files hashes observation_ids
-context_refs evidence_ids criteria summary links health payload statistics spawns undos'''.split())
+context_refs evidence_ids criteria summary links health payload statistics spawns undos choice'''.split())
 
 
 def new_id():
@@ -96,7 +96,7 @@ def sanitize(value, *, visible=False, depth=0, key=''):
                 result[k] = sanitize(v, visible=visible, depth=depth+1, key=k)
         return result
     if isinstance(value, (list, tuple)):
-        cap = 256 if key == 'points' else 32 if key in {'observation_ids', 'evidence_ids', 'links'} else 12
+        cap = 256 if key == 'points' else 32 if key in {'observation_ids', 'evidence_ids', 'links', 'files'} else 12
         return [sanitize(v, visible=visible, depth=depth+1) for v in value[:cap]]
     if isinstance(value, bool): return value
     if isinstance(value, (float, int)):
@@ -176,8 +176,27 @@ class EventFactory:
 
 
 def validate_event(value):
-    if value.get('schema_version') != 1 or value.get('event_type') not in EVENT_TYPES:
+    keys = {'schema_version','event_id','run_id','session_id','source','source_instance_id','source_sequence',
+            'event_type','source_timestamp_utc','received_at_utc','monotonic_ns','correlation_id','causation_id',
+            'decision_id','goal_id','action_id','control','observation_ids','payload'}
+    if set(value) != keys or type(value.get('schema_version')) is not int or value['schema_version'] != 1 or value.get('event_type') not in EVENT_TYPES:
         raise ValueError('unsupported event contract')
+    if not isinstance(value['payload'],dict) or not isinstance(value['observation_ids'],list) or len(value['observation_ids'])>32:
+        raise ValueError('invalid payload/references')
+    if value['source'] != 'gregory.collector' or safe_text(value['session_id'],160) != value['session_id']:
+        raise ValueError('invalid source identity')
+    for k in ('source_timestamp_utc','received_at_utc'):
+        if not isinstance(value[k],str) or not value[k].endswith('Z'): raise ValueError('invalid UTC')
+        datetime.fromisoformat(value[k].replace('Z','+00:00'))
+    control=value['control']
+    if not isinstance(control,dict) or set(control) != {'actor_id','map_name','bridge_session','control_epoch','intent_version'}:
+        raise ValueError('invalid control context')
+    if control['actor_id'] is not None and not re.fullmatch(r'[0-9a-f]{24}',control['actor_id']):
+        raise ValueError('raw actor identity forbidden')
+    for k in ('map_name','bridge_session'):
+        if control[k] is not None and safe_text(control[k],160) != control[k]: raise ValueError('invalid context text')
+    for k in ('control_epoch','intent_version'):
+        if control[k] is not None and type(control[k]) is not int: raise ValueError('invalid control counter')
     for k in ('event_id', 'run_id', 'source_instance_id'):
         uuid.UUID(value[k])
     for k in ('correlation_id', 'decision_id', 'goal_id', 'action_id', 'causation_id'):
@@ -185,7 +204,7 @@ def validate_event(value):
     for ref in value['observation_ids']: uuid.UUID(ref)
     if isinstance(value['source_sequence'], bool) or not isinstance(value['source_sequence'], int) or value['source_sequence'] < 1:
         raise ValueError('invalid sequence')
-    if not isinstance(value['monotonic_ns'], int) or value['monotonic_ns'] < 0:
+    if type(value['monotonic_ns']) is not int or value['monotonic_ns'] < 0:
         raise ValueError('invalid monotonic clock')
     encoded = json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(',', ':'))
     if len(encoded.encode()) > 65536: raise ValueError('event exceeds 64 KiB')
