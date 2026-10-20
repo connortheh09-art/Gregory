@@ -9,9 +9,17 @@ import os
 import subprocess
 import time
 
-HERE = r"C:\Users\Conman\Downloads\openclaw\greg"
+HERE = os.environ.get("GREG_HOME", os.path.dirname(os.path.abspath(__file__)))
+
+def _find(name):
+    """Repo split: runtime files sit beside us, voice/ holds gdiscord.py."""
+    for p in (os.path.join(HERE, name), os.path.join(HERE, os.pardir, "voice", name)):
+        if os.path.exists(p):
+            return os.path.abspath(p)
+    return os.path.join(HERE, name)
+
 LOG = os.path.join(HERE, "gdiscord.log")
-SCRIPT = os.path.join(HERE, "gdiscord.py")
+SCRIPT = _find("gdiscord.py")
 KILL = os.path.join(HERE, "killgdiscord.ps1")
 WLOG = os.path.join(HERE, "watchdog.log")
 

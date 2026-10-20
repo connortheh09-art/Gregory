@@ -11,8 +11,16 @@ import subprocess
 import sys
 import time
 
-HERE = r"C:\Users\Conman\Downloads\openclaw\greg"
-BOT = os.path.join(HERE, "gdiscord.py")
+HERE = os.environ.get("GREG_HOME", os.path.dirname(os.path.abspath(__file__)))
+
+def _find(name):
+    """Repo split: runtime files sit beside us, voice/ holds gdiscord.py."""
+    for p in (os.path.join(HERE, name), os.path.join(HERE, os.pardir, "voice", name)):
+        if os.path.exists(p):
+            return os.path.abspath(p)
+    return os.path.join(HERE, name)
+
+BOT = _find("gdiscord.py")
 WD = os.path.join(HERE, "watchdog.py")
 BOTLOG = os.path.join(HERE, "gdiscord.log")
 WDLOG = os.path.join(HERE, "watchdog.log")
