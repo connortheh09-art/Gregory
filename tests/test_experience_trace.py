@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 from pathlib import Path
 import sys
@@ -136,7 +137,7 @@ class Trace(unittest.TestCase):
         self.sample(2,2,500);self.sample(3,2.5,500);self.sample(4,3,500)
         result=self.result(trace)
         import sqlite3
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('DELETE FROM events WHERE event_id=?',(trace.observation_ids[0],))
         with open_reader(self.path) as db:
             partial=get_experience(db,trace.correlation_id)

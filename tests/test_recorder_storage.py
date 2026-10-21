@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -43,16 +44,16 @@ class Storage(unittest.TestCase):
 
     def test_newer_schema_left_untouched(self):
         self.path.parent.mkdir()
-        with sqlite3.connect(self.path) as db: db.execute('PRAGMA user_version=99')
+        with closing(sqlite3.connect(self.path)) as db, db: db.execute('PRAGMA user_version=99')
         r=self.recorder();self.assertEqual(r.health()['status'],'degraded')
-        with sqlite3.connect(self.path) as db: self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],99)
+        with closing(sqlite3.connect(self.path)) as db, db: self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],99)
 
     def test_unrelated_schema_one_is_not_reconfigured(self):
         self.path.parent.mkdir()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('PRAGMA user_version=1');db.execute('CREATE TABLE unrelated(data)')
         r=self.recorder();self.assertEqual(r.health()['status'],'degraded')
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0],'delete')
             self.assertEqual(db.execute('SELECT COUNT(*) FROM unrelated').fetchone()[0],0)
 
@@ -72,7 +73,7 @@ class Storage(unittest.TestCase):
         r=self.recorder();trace=TraceContext(r.run_id,new_id(),decision_id=new_id())
         r.record('decision.requested',{},trace=trace,priority='critical');r.close()
         # Emulate absence of a committed orderly termination after a crash.
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('UPDATE runs SET ended_at_utc=NULL,end_reason=NULL')
             db.execute("UPDATE experiences SET record_state='open',closure_reason=NULL,terminal_event_id=NULL")
         second=self.recorder();second.close()
@@ -160,7 +161,7 @@ os._exit(0)
     def test_retention_expires_closed_run_and_emits_marker(self):
         r=self.recorder();trace=TraceContext(r.run_id,new_id(),decision_id=new_id())
         r.record('decision.requested',{},trace=trace,priority='critical');r.close()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("UPDATE runs SET ended_at_utc='2000-01-01T00:00:00Z'")
         second=self.recorder();second.record('run.heartbeat',{})
         until=time.monotonic()+2

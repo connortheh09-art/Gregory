@@ -1,3 +1,4 @@
+from contextlib import closing
 """Independent-review reproductions: poison events, recovery and auxiliary lanes."""
 import json
 from pathlib import Path
@@ -131,7 +132,7 @@ class ReviewFixes(unittest.TestCase):
     def test_restart_terminal_belongs_to_old_run_and_is_idempotent(self):
         r = self.recorder(); trace = TraceContext(r.run_id, new_id(), decision_id=new_id())
         r.record('decision.requested', {}, trace=trace, priority='critical'); r.close()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             # Simulated pre-closure crash snapshot; no fabricated terminal history.
             db.execute("DELETE FROM events WHERE event_type IN ('run.ended','outcome.evaluated','experience.closed')")
             db.execute('DELETE FROM links WHERE from_event_id NOT IN (SELECT event_id FROM events)')
@@ -159,7 +160,7 @@ class ReviewFixes(unittest.TestCase):
         event = r.record('decision.requested', {}, trace=trace)
         self.wait_for(lambda: self.committed(event.as_dict()['event_id']))
         r.close()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("DELETE FROM events WHERE event_type IN ('run.ended','outcome.evaluated','experience.closed')")
             db.execute('DELETE FROM links WHERE from_event_id NOT IN (SELECT event_id FROM events)')
             db.execute('UPDATE runs SET ended_at_utc=NULL,end_reason=NULL')
@@ -260,7 +261,7 @@ class ReviewFixes(unittest.TestCase):
     def test_legacy_v1_terminal_is_resolved_without_inventing_a_closure(self):
         r = self.recorder(); trace = TraceContext(r.run_id, new_id(), decision_id=new_id())
         r.record('decision.requested', {}, trace=trace); r.close()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             ended = db.execute("SELECT event_id FROM events WHERE event_type='run.ended'").fetchone()[0]
             db.execute('UPDATE experiences SET terminal_event_id=?', (ended,))
             db.execute("DELETE FROM events WHERE event_type='experience.closed'")
