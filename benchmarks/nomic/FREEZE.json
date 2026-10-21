@@ -1,0 +1,27 @@
+{
+  "kind": "PRE_MEASUREMENT_FIXTURE_FREEZE",
+  "utc": "2026-10-21T23:48:51.573343+00:00",
+  "episodes": 67,
+  "queries": 99,
+  "dev": 24,
+  "held_out_test": 75,
+  "no_model_scores_observed": true,
+  "files": [
+    {
+      "path": "fixtures.json",
+      "sha256": "d1772fa8de6a33d419c873d7de6eab37a0400ea0f2ef6cb608336de7a8792fdf"
+    },
+    {
+      "path": "GROUND_TRUTH.md",
+      "sha256": "e85e378d895b1e925aacca180c36640e08115af780540278013060612fed74de"
+    },
+    {
+      "path": "PROTOCOL.md",
+      "sha256": "ca3f073c56f14726eb3fb367315ff8a773bb43d4edb449bdd57ade32bf628bed"
+    },
+    {
+      "path": "create_fixture.py",
+      "sha256": "d34aa13ebab3d83b33f753f676dd838eb5f0841e937255d461ca9f4379589be4"
+    }
+  ]
+}
