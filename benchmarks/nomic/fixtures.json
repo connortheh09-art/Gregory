@@ -1,5 +1,5 @@
 {
-  "schema": "gregory.synthetic.nomic-benchmark.v1",
+  "schema": "gregory.synthetic.nomic-benchmark.v2-label-audit",
   "synthetic_only": true,
   "curator": "Gordon; independent ground-truth review assigned to Greg",
   "consolidation_scope": "fixture-authored evidence-linked reported summaries, NOT automatic narrative generation",
@@ -2773,7 +2773,8 @@
         "gmod",
         "succeeded",
         "objects",
-        "temporal"
+        "temporal",
+        "keyword_control"
       ],
       "before_summary": "On October 14 I inspected the depot door and found it locked. That observation concerns that date only; it says nothing about the door now.",
       "events": [
@@ -6398,7 +6399,8 @@
       "tags": [
         "minecraft",
         "succeeded",
-        "temporal"
+        "temporal",
+        "keyword_control"
       ],
       "before_summary": "On October 18 in Minecraft the camp was at x=120 z=-40 beside a river. These historical coordinates are not my current position.",
       "events": [
@@ -11482,7 +11484,8 @@
       "tags": [
         "gmod",
         "succeeded",
-        "objects"
+        "objects",
+        "keyword_control"
       ],
       "before_summary": "In the north laboratory, a triangular switch opened a hatch. The action succeeded in that room only; another switch existed elsewhere.",
       "events": [
@@ -11719,7 +11722,8 @@
       "tags": [
         "gmod",
         "failed",
-        "objects"
+        "objects",
+        "keyword_control"
       ],
       "before_summary": "In the west workshop, a circular switch did not open a hatch. That failure belongs to this room, not the north laboratory.",
       "events": [
@@ -14791,7 +14795,7 @@
       "expected_ids": [
         "E001"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "gmod"
       },
@@ -14859,7 +14863,7 @@
       "expected_ids": [
         "E005"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -14910,7 +14914,7 @@
       "expected_ids": [
         "E008"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -14927,7 +14931,7 @@
       "expected_ids": [
         "E009"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -14961,7 +14965,7 @@
       "expected_ids": [
         "E011"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -14978,7 +14982,7 @@
       "expected_ids": [
         "E012"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -14995,7 +14999,7 @@
       "expected_ids": [
         "E013"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "gmod",
         "session_id": "gmod-2026-10-14"
@@ -15004,7 +15008,8 @@
         "gmod",
         "succeeded",
         "objects",
-        "temporal"
+        "temporal",
+        "keyword_control"
       ],
       "class_name": "supported"
     },
@@ -15033,7 +15038,7 @@
       "expected_ids": [
         "E015"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -15067,7 +15072,7 @@
       "expected_ids": [
         "E017"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -15084,7 +15089,7 @@
       "expected_ids": [
         "E018"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "gmod"
       },
@@ -15101,7 +15106,7 @@
       "expected_ids": [
         "E019"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "gmod"
       },
@@ -15152,7 +15157,7 @@
       "expected_ids": [
         "E022"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "gmod"
       },
@@ -15204,7 +15209,7 @@
       "expected_ids": [
         "E025"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "minecraft"
       },
@@ -15220,7 +15225,7 @@
       "expected_ids": [
         "E026"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "minecraft"
       },
@@ -15236,7 +15241,7 @@
       "expected_ids": [
         "E027"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "minecraft"
       },
@@ -15276,7 +15281,8 @@
       "tags": [
         "minecraft",
         "succeeded",
-        "temporal"
+        "temporal",
+        "keyword_control"
       ],
       "class_name": "supported"
     },
@@ -15304,7 +15310,7 @@
       "expected_ids": [
         "E031"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "minecraft"
       },
@@ -15352,7 +15358,7 @@
       "expected_ids": [
         "E034"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "minecraft"
       },
@@ -15400,7 +15406,7 @@
       "expected_ids": [
         "E037"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "discord"
       },
@@ -15417,7 +15423,7 @@
       "expected_ids": [
         "E038"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "discord"
       },
@@ -15434,7 +15440,7 @@
       "expected_ids": [
         "E039"
       ],
-      "split": "test",
+      "split": "dev",
       "filters": {
         "domain": "discord"
       },
@@ -15502,7 +15508,7 @@
       "expected_ids": [
         "E043"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "discord"
       },
@@ -15552,7 +15558,7 @@
       "expected_ids": [
         "E046"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "discord"
       },
@@ -15601,7 +15607,7 @@
         "E049",
         "E050"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "discord"
       },
@@ -15655,7 +15661,7 @@
         "E051",
         "E052"
       ],
-      "split": "dev",
+      "split": "test",
       "filters": {
         "domain": "discord"
       },
@@ -15679,7 +15685,8 @@
       "tags": [
         "gmod",
         "succeeded",
-        "objects"
+        "objects",
+        "keyword_control"
       ],
       "class_name": "supported"
     },
@@ -15696,7 +15703,8 @@
       "tags": [
         "gmod",
         "failed",
-        "objects"
+        "objects",
+        "keyword_control"
       ],
       "class_name": "supported"
     },
@@ -15724,12 +15732,12 @@
       "id": "Q056",
       "query": "How did the later visit to the transmitting tower differ from the first?",
       "expected_ids": [
+        "E055",
         "E056"
       ],
       "split": "test",
       "filters": {
-        "domain": "gmod",
-        "session_id": "gmod-2026-10-19"
+        "domain": "gmod"
       },
       "tags": [
         "gmod",
@@ -16299,26 +16307,38 @@
     {
       "id": "Q097",
       "query": "What are your current Minecraft coordinates right now?",
-      "expected_ids": [],
+      "expected_ids": [
+        "E029",
+        "E030"
+      ],
       "split": "test",
-      "filters": {},
+      "filters": {
+        "domain": "minecraft"
+      },
       "tags": [
-        "no_evidence",
         "historical_state_guard"
       ],
-      "class_name": "no_supported_memory"
+      "class_name": "historical_state_assertion",
+      "retrieval_scored": true,
+      "assertion_expected": "unknown_live_state"
     },
     {
       "id": "Q098",
       "query": "Is the depot door open right now?",
-      "expected_ids": [],
+      "expected_ids": [
+        "E013",
+        "E014"
+      ],
       "split": "test",
-      "filters": {},
+      "filters": {
+        "domain": "gmod"
+      },
       "tags": [
-        "no_evidence",
         "historical_state_guard"
       ],
-      "class_name": "no_supported_memory"
+      "class_name": "historical_state_assertion",
+      "retrieval_scored": true,
+      "assertion_expected": "unknown_live_state"
     },
     {
       "id": "Q099",
@@ -16327,10 +16347,11 @@
       "split": "test",
       "filters": {},
       "tags": [
-        "no_evidence",
         "historical_state_guard"
       ],
-      "class_name": "no_supported_memory"
+      "class_name": "historical_state_assertion",
+      "retrieval_scored": false,
+      "assertion_expected": "unknown_live_state"
     }
   ]
 }

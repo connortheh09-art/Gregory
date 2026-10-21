@@ -1,27 +1,29 @@
 {
-  "kind": "PRE_MEASUREMENT_FIXTURE_FREEZE",
-  "utc": "2026-10-21T23:48:51.573343+00:00",
+  "kind": "PRE_MEASUREMENT_FIXTURE_FREEZE_V2_LABEL_AUDIT",
+  "supersedes": "425d794 pre-score label freeze",
+  "utc": "2026-10-21T23:52:36.786165+00:00",
   "episodes": 67,
   "queries": 99,
   "dev": 24,
   "held_out_test": 75,
+  "episode_disjoint_splits": true,
   "no_model_scores_observed": true,
   "files": [
     {
       "path": "fixtures.json",
-      "sha256": "d1772fa8de6a33d419c873d7de6eab37a0400ea0f2ef6cb608336de7a8792fdf"
+      "sha256": "c9a72a8c9befc331d71c50f7104731e259d7bed8473fb05cbe5d0e36885f3dbf"
     },
     {
       "path": "GROUND_TRUTH.md",
-      "sha256": "e85e378d895b1e925aacca180c36640e08115af780540278013060612fed74de"
+      "sha256": "78cd9c1df72bc062085fcaaa289f2ecef9f6aad73ba5a82db028939a32f93454"
     },
     {
       "path": "PROTOCOL.md",
-      "sha256": "ca3f073c56f14726eb3fb367315ff8a773bb43d4edb449bdd57ade32bf628bed"
+      "sha256": "25dc23aaed8542d694024ae25e6fed6fa3ae9385a6630866fc5334136fe7407c"
     },
     {
       "path": "create_fixture.py",
-      "sha256": "d34aa13ebab3d83b33f753f676dd838eb5f0841e937255d461ca9f4379589be4"
+      "sha256": "13b7007cf2569d798ee905b9a963a78efcf9e316c9a41ce8a9aa526f9563cddf"
     }
   ]
 }

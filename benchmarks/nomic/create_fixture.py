@@ -160,7 +160,8 @@ def make_events(row):
 
 def build():
     episodes, queries = [], []
-    dev_ids = {f'E{i:03}' for i in range(1, 53, 3)}  # 18 independently fixed dev episodes
+    # Audit v2: no target episode (including a conflict pair) crosses dev/test.
+    dev_ids = {f'E{i:03}' for i in [4,5,7,8,9,10,11,12,15,16,17,18,26,27,28,38,39,40]}
     for line in STORIES.splitlines():
         ident, domain, date, outcome, text, query = line.split('|')
         tags = [domain, outcome]
@@ -172,6 +173,7 @@ def build():
         if 37 <= n <= 44:tags.append('fictional_preference')
         if 49 <= n <= 52:tags.append('conflicting_reports')
         if n in (13,14,29,30,55,56,57,58):tags.append('temporal')
+        if n in (13,29,53,54):tags.append('keyword_control')
         lifecycle = 'correct' if n in (59,60,65) else 'expire' if n in (61,62,66) else 'forget' if n in (63,64,67) else 'retain'
         if lifecycle != 'retain':tags.append(lifecycle)
         row = dict(id=ident, domain=domain, date=date, occurred=epoch(date, 13 if lifecycle=='expire' else 16),
@@ -186,8 +188,9 @@ def build():
         expected = [] if lifecycle in ('expire','forget') else [ident]
         if ident in ('E049','E050'):expected=['E049','E050']
         if ident in ('E051','E052'):expected=['E051','E052']
+        if ident=='E056':expected=['E055','E056']
         filters = {'domain':domain}
-        if ident in ('E013','E014','E029','E030','E055','E056','E057','E058'):
+        if ident in ('E013','E014','E029','E030','E055','E057','E058'):
             filters['session_id'] = row['session_id']
         queries.append(dict(id='Q'+ident[1:], query=query, expected_ids=expected,
                             split='dev' if ident in dev_ids else 'test', filters=filters,
@@ -197,16 +200,26 @@ def build():
         queries.append(dict(id=f'Q{index:03}', query=query, expected_ids=expected,
                             split='test', filters={'domain':domain}, tags=[tag], class_name='supported'))
     for index, query in enumerate(NO_EVIDENCE, 82):
-        queries.append(dict(id=f'Q{index:03}', query=query, expected_ids=[],
+        expected = {97:['E029','E030'],98:['E013','E014']}.get(index,[])
+        filters = {97:{'domain':'minecraft'},98:{'domain':'gmod'}}.get(index,{})
+        queries.append(dict(id=f'Q{index:03}', query=query, expected_ids=expected,
                             split='dev' if index < 88 else 'test', filters={},
                             tags=['no_evidence'] + (['historical_state_guard'] if 'right now' in query else []),
                             class_name='no_supported_memory'))
+        queries[-1]['filters'] = filters
+        if index >= 97:
+            queries[-1].update(class_name='historical_state_assertion',
+                               retrieval_scored=index!=99, assertion_expected='unknown_live_state')
+            queries[-1]['tags']=['historical_state_guard']
     assert len(episodes)==67 and len(queries)==99
     assert sum(q['split']=='dev' for q in queries)==24
+    dev_targets={e for q in queries if q['split']=='dev' for e in q['expected_ids']}
+    test_targets={e for q in queries if q['split']=='test' for e in q['expected_ids']}
+    assert not dev_targets.intersection(test_targets)
     # Bound ASCII inputs conservatively below both installed configurations' limits.
     for text in [e['summary'] for e in episodes]+[e['before_summary'] for e in episodes]+[q['query'] for q in queries]:
         assert text.isascii() and len(text.encode()) + len('search_document: ') <= 400, text
-    return dict(schema='gregory.synthetic.nomic-benchmark.v1', synthetic_only=True,
+    return dict(schema='gregory.synthetic.nomic-benchmark.v2-label-audit', synthetic_only=True,
                 curator='Gordon; independent ground-truth review assigned to Greg',
                 consolidation_scope='fixture-authored evidence-linked reported summaries, NOT automatic narrative generation',
                 clock_before=epoch('2026-10-22',12), clock_after=epoch('2026-10-22',14),
@@ -221,13 +234,19 @@ def main():
            '', '67 synthetic episodes; 99 queries: 24 dev / 75 held-out test. k=5; three latency repeats.',
            'Curated summaries are reported synthetic fixture text, not automatic narrative consolidation.',
            'Filters are supplied question context, fixed identically for every backend. No live game is connected.',
+           'v2 label audit: target episodes are disjoint across dev/test; Q056 needs both visits; Q097/Q098 score historical retrieval separately from live assertions; Q099 is assertion-only/ungraded retrieval.',
+           'Retention: 2592000 seconds (30 days). Fixed UTC clocks: 2026-10-22 12:00 before, 14:00 after. Exactly E061/E062/E066 expire and E063/E064/E067 are forgotten; corrected E065 remains.',
            '', '## Episodes', '']
     for e in data['episodes']:
-        lines += [f"### {e['id']} · {e['domain']} · {e['date']} · {e['outcome']} · {e['lifecycle']}", e['summary'], '']
+        terminal=e['events'][-1]
+        sha=hashlib.sha256(json.dumps(terminal,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+        lines += [f"### {e['id']} · {e['domain']} · {e['date']} · {e['outcome']} · {e['lifecycle']}", e['summary'],
+                  f"Evidence: run/source_instance `{e['run_id']}`; session `{e['session_id']}`; correlation `{e['correlation_id']}`.",
+                  f"Terminal event `{terminal['event_id']}`, source_sequence {terminal['source_sequence']}, canonical-envelope SHA256 `{sha}`. All event IDs, source sequences and envelopes: fixtures.json → {e['id']} → events.", '']
     lines += ['## Questions and expected memory IDs', '']
     for q in data['queries']:
         lines += [f"- **{q['id']} [{q['split']}]** {q['query']}",
-                  f"  Expected: {', '.join(q['expected_ids']) or 'NO SUPPORTED MEMORY'}; context: {json.dumps(q['filters'],sort_keys=True)}; tags: {', '.join(q['tags'])}."]
+                  f"  Expected: {', '.join(q['expected_ids']) or ('UNSCORED RETRIEVAL / LIVE ASSERTION ONLY' if not q.get('retrieval_scored',True) else 'NO SUPPORTED MEMORY')}; context: {json.dumps(q['filters'],sort_keys=True)}; tags: {json.dumps(q['tags'])}"]
     out.with_name('GROUND_TRUTH.md').write_text('\n'.join(lines)+'\n')
     print(json.dumps({'episodes':67,'queries':99,'dev':24,'test':75,'fixture_sha256':hashlib.sha256(encoded).hexdigest()}))
 
