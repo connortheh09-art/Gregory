@@ -252,8 +252,10 @@ class MemoryV02:
    if claims:matched.append((m,claims))
   if not matched:result['answer_uncertainty']='no_supported_memory';return result
   # Presuppositions are facts to check, not an invitation to invent an intervening event.
+  proof_before=instant(contract.get('as_of'))
+  if proof_before is None and contract.get('time_window'):proof_before=instant(contract['time_window'][1])
   for need in contract.get('requires',[]):
-   if not any(any(c['subject']==need['subject'] and c['predicate']==need['predicate'] and c['value']==need['value'] and c['evidence_kind']!='unknown' for c in m['claims']) for m in candidates if not contract.get('reality') or m['reality']==contract['reality']):result['answer_uncertainty']='premise_unsupported';return result
+   if not any(any(c['subject']==need['subject'] and c['predicate']==need['predicate'] and ('value' not in need or c['value']==need['value']) and c['evidence_kind']=='observed' and (proof_before is None or all(json.loads(self.db.execute('SELECT projection FROM evidence WHERE event_id=?',(ref,)).fetchone()[0])['occurred']<=proof_before for ref in c['evidence_ids'])) for c in m['claims']) for m in candidates if not m['contested'] and (not contract.get('reality') or m['reality']==contract['reality'])):result['answer_uncertainty']='premise_unverified';result['premise_status']='unverified';return result
   if contract.get('selection')=='latest_recorded':matched.sort(key=lambda x:(-x[0]['occurred'],x[0]['memory_id']));matched=matched[:1]
   elif contract.get('selection')=='earliest_recorded':matched.sort(key=lambda x:(x[0]['occurred'],x[0]['memory_id']));matched=matched[:1]
   # Determine conflict relevance at the question's time, not merely somewhere in history.
@@ -271,6 +273,7 @@ class MemoryV02:
      if contract.get('time_window'):
       start,end=map(instant,contract['time_window'])
       if not overlaps(c,dict(valid_from=start,valid_to=end)):continue
+      if c['evidence_kind']=='observed' and not any(start<=json.loads(self.db.execute('SELECT projection FROM evidence WHERE event_id=?',(ref,)).fetchone()[0])['occurred']<end for ref in c['evidence_ids']):continue
      if any(c['value']!=existing['value'] and overlaps(c,existing) for existing in cs):compatible.append(c)
     if compatible:
      relevant.append((m['memory_id'],other_id))

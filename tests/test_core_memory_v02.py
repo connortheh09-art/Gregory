@@ -29,7 +29,7 @@ class V02(unittest.TestCase):
  def test_current_position_never_established(self):
   self.fixture();r=self.store.search('where am I now?',actor=ACTOR,embedder=self.embed,contract={'scope':'current','subject':'station_hatch','predicate':'state'});self.assertFalse(r['hits']);self.assertFalse(r['live_state_asserted']);self.assertEqual(r['answer_uncertainty'],'live_state_unknown')
  def test_false_premise_does_not_get_adopted(self):
-  self.fixture();r=self.store.search('after hatch repaired?',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','requires':[{'subject':'station_hatch','predicate':'repaired','value':True}]});self.assertFalse(r['hits']);self.assertEqual(r['answer_uncertainty'],'premise_unsupported')
+  self.fixture();r=self.store.search('after hatch repaired?',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','requires':[{'subject':'station_hatch','predicate':'repaired','value':True}]});self.assertFalse(r['hits']);self.assertEqual(r['answer_uncertainty'],'premise_unverified')
  def test_fictional_claim_cannot_answer_real_query(self):
   self.fixture(reality='fictional');r=self.store.search('hatch',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','reality':'real'});self.assertFalse(r['hits'])
  def test_later_observation_not_retroactive_proof(self):
@@ -75,4 +75,14 @@ class V02(unittest.TestCase):
   r=self.store.search('hatch earlier',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','as_of':1700000020.});self.assertEqual([m['memory_id'] for m in r['hits']],[a]);self.assertEqual(r['answer_status'],'supported')
  def test_observation_prioritized_but_report_not_erased(self):
   a,*_=self.fixture(kind='reported');b,*_=self.fixture('open',kind='observed');r=self.store.search('hatch',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state'});self.assertEqual(r['hits'][0]['memory_id'],b);self.assertEqual({m['memory_id'] for m in r['hits']},{a,b});self.assertTrue(r['contested']);self.assertEqual(r['answer_status'],'uncertain')
+ def test_explicit_obligation_can_be_satisfied_without_a_value(self):
+  self.fixture();r=self.store.search('hatch',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','requires':[{'subject':'station_hatch','predicate':'state'}]});self.assertTrue(r['hits']);self.assertEqual(r['answer_status'],'supported')
+ def test_report_cannot_silently_establish_a_presupposition(self):
+  self.fixture(kind='reported');r=self.store.search('hatch',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','requires':[{'subject':'station_hatch','predicate':'state','value':'locked'}]});self.assertFalse(r['hits']);self.assertEqual(r['premise_status'],'unverified')
+ def test_future_observation_cannot_prove_a_historical_presupposition(self):
+  self.fixture();self.fixture(subject='repair_record',start=1700000030.,end=1700000080.);r=self.store.search('hatch after repair',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','as_of':1700000020.,'requires':[{'subject':'repair_record','predicate':'state','value':'locked'}]});self.assertFalse(r['hits']);self.assertEqual(r['premise_status'],'unverified')
+ def test_contested_observation_cannot_satisfy_a_presupposition(self):
+  self.fixture();self.fixture(subject='repair_record');self.fixture('open',subject='repair_record');r=self.store.search('hatch after repair',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','requires':[{'subject':'repair_record','predicate':'state','value':'locked'}]});self.assertFalse(r['hits']);self.assertEqual(r['premise_status'],'unverified')
+ def test_conflict_expansion_does_not_admit_later_observation(self):
+  a,*_=self.fixture(end=1700000100.);self.fixture('open',end=1700000100.,time=1700000070.);r=self.store.search('hatch during first minute',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','time_window':[1700000000.,1700000060.]});self.assertEqual([m['memory_id'] for m in r['hits']],[a]);self.assertEqual(r['answer_status'],'supported')
 if __name__=='__main__':unittest.main()
