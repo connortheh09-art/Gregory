@@ -45,9 +45,13 @@ def expand(e,old):
  emit('controller.feedback',{'status':'arrived' if e['outcome']=='succeeded' else 'blocked' if e['outcome']=='failed' else 'idle'},[obs['event_id']])
  if e['outcome'] in ('succeeded','failed'):emit('outcome.evaluated',{'world_outcome':e['outcome'],'verdict':'pass' if e['outcome']=='succeeded' else 'fail','evaluator':'synthetic.v02'},[obs['event_id']])
  text=narrative(e,old);closed=emit('experience.closed',{'world_outcome':e['outcome'],'closure_reason':'verified_arrival' if e['outcome']=='succeeded' else 'timeout','memory_narrative':text},[obs['event_id']])
+ # Synthetic adapter extension: PR1's unchanged producer allowlist drops v0.2 fields.
+ # Attach these bounded fields to the test envelope, as with memory_claims above.
+ closed['payload']['memory_narrative']=text
  correction_ids=[]
  if e['lifecycle']=='correct':
   correction=emit('observation.accepted',{'memory_narrative':e['correction_text']})
+  correction['payload']['memory_narrative']=e['correction_text']
   for c in claims:c['evidence_ids']=[correction['event_id']]
   correction['payload']['memory_claims']=claims;correction_ids=[correction['event_id']]
  return {'spec':e,'events':events,'initial_claims':initial,'final_claims':claims,'summary':text,'correction_ids':correction_ids}
