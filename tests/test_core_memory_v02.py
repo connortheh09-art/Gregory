@@ -70,4 +70,9 @@ class V02(unittest.TestCase):
  def test_ingest_identity_collision_not_silently_ignored(self):
   _,events,_,_=self.fixture();changed=copy.deepcopy(events[0]);changed['event_id']=str(uuid.uuid4())
   with self.assertRaises(Exception):self.store.ingest([changed],actor=ACTOR)
+ def test_conflict_outside_query_time_not_contested_answer(self):
+  a,*_=self.fixture(start=1700000000.,end=1700000090.);self.fixture('open',start=1700000050.,end=1700000070.)
+  r=self.store.search('hatch earlier',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state','as_of':1700000020.});self.assertEqual([m['memory_id'] for m in r['hits']],[a]);self.assertEqual(r['answer_status'],'supported')
+ def test_observation_prioritized_but_report_not_erased(self):
+  a,*_=self.fixture(kind='reported');b,*_=self.fixture('open',kind='observed');r=self.store.search('hatch',actor=ACTOR,embedder=self.embed,contract={'subject':'station_hatch','predicate':'state'});self.assertEqual(r['hits'][0]['memory_id'],b);self.assertEqual({m['memory_id'] for m in r['hits']},{a,b});self.assertTrue(r['contested']);self.assertEqual(r['answer_status'],'uncertain')
 if __name__=='__main__':unittest.main()

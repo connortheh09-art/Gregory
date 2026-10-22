@@ -256,14 +256,31 @@ class MemoryV02:
    if not any(any(c['subject']==need['subject'] and c['predicate']==need['predicate'] and c['value']==need['value'] and c['evidence_kind']!='unknown' for c in m['claims']) for m in candidates if not contract.get('reality') or m['reality']==contract['reality']):result['answer_uncertainty']='premise_unsupported';return result
   if contract.get('selection')=='latest_recorded':matched.sort(key=lambda x:(-x[0]['occurred'],x[0]['memory_id']));matched=matched[:1]
   elif contract.get('selection')=='earliest_recorded':matched.sort(key=lambda x:(x[0]['occurred'],x[0]['memory_id']));matched=matched[:1]
-  contested=any(m['contested'] for m,c in matched)
-  # Complete the conflict set even when one side fell below top-k; never hide one side.
-  if contested:
-   have={m['memory_id'] for m,c in matched};extras={x for m,c in matched for x in m['contested_with']}-have
-   for mid in sorted(extras):
-    m=self.inspect(mid,actor=actor)
-    if m and not m['expired']:matched.append((m,m['claims']))
+  # Determine conflict relevance at the question's time, not merely somewhere in history.
+  relevant=[];seen={m['memory_id'] for m,c in matched}
+  for m,cs in list(matched):
+   for other_id in m['contested_with']:
+    other=self.inspect(other_id,actor=actor)
+    if other is None or other['expired']:continue
+    compatible=[]
+    for c in other['claims']:
+     if (c['subject'],c['predicate'])!=(contract['subject'],contract['predicate']):continue
+     at=instant(contract.get('as_of'))
+     if at is not None and (c['valid_from'] is None or c['valid_from']>at or c['valid_to'] is not None and at>=c['valid_to']):continue
+     if at is not None and c['evidence_kind']=='observed' and any(json.loads(self.db.execute('SELECT projection FROM evidence WHERE event_id=?',(ref,)).fetchone()[0])['occurred']>at for ref in c['evidence_ids']):continue
+     if contract.get('time_window'):
+      start,end=map(instant,contract['time_window'])
+      if not overlaps(c,dict(valid_from=start,valid_to=end)):continue
+     if any(c['value']!=existing['value'] and overlaps(c,existing) for existing in cs):compatible.append(c)
+    if compatible:
+     relevant.append((m['memory_id'],other_id))
+     if other_id not in seen:matched.append((other,compatible));seen.add(other_id)
+  contested=bool(relevant)
+  # Evidence-kind priority is explicit ordering, never deletion of dissenting testimony.
+  preference={'observed':0,'reported':1,'inferred':2,'unknown':3}
+  matched.sort(key=lambda pair:(min(preference[c['evidence_kind']] for c in pair[1]),-pair[0].get('relevance',-1),pair[0]['memory_id']))
   result['hits']=[m for m,c in matched];result['answer_claims']=[c for m,cs in matched for c in cs]
+  result['contested']=contested;result['conflict_pairs']=relevant
   result['answer_status']='uncertain' if contested or any(c['evidence_kind'] in ('unknown','reported','inferred') or c['value'] in (None,'unknown') for c in result['answer_claims']) else 'supported'
   result['answer_uncertainty']='contested' if contested else 'reported_or_inferred_or_unknown' if result['answer_status']=='uncertain' else 'none'
   return result

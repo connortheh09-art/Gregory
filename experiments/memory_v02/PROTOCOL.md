@@ -1,0 +1,15 @@
+# Memory v0.2 candidate — pre-measurement scope
+
+Preserve c5e08e5 v0.1, PR1 and the original benchmark. No service/configuration changes or deployment. Source-only isolated candidate.
+
+Diagnosis: Q068/E001 was raw rank6 (.592587), below E055 (.593555) and E012 (.622215). Correct single prefixes, full768 vectors,42-token document, API/native parity: no observed prefix/truncation issue. Pooling/quantization/representation effects have not been causally isolated.
+
+Candidate semantic experiment: **full narrative plus first three exact sentence spans**, maximum cosine per episode, deterministic episode-ID ties. Same installed v1.5 Q4_K_M/768/prefixes for both versions. No keyword fusion, hand-written query aliases, new models or numerical gate tuning. Original Q068 is diagnostic, NEVER a fresh held-out win. Developer examples are new cart/library/receiver/etc experiences, not rewritten curb prompts.
+
+Answerability is a separate typed contract boundary: subject, predicate, reality, time and presupposition obligations. Query similarity never proves a fact. Free text without a factual contract yields candidates and unknown. No general NLP parser or generation is claimed. Source-bound scalar claims retain observed/reported/inferred/unknown labels; narratives are exact, cited source records. Corrected/forgotten/expired text and vectors are invalidated; stable IDs/tombstones survive restart.
+
+Contested = same subject + predicate + domain/context/reality + overlapping half-open intervals + incompatible values. Different times do not contest. Direct observations rank above reports on the same factual contract, without erasing disagreements; conflicting evidence remains visible and answer status uncertain. An observation cannot establish an earlier exact instant; minute/day windows must be explicit, and the actual evidence timestamp is retained.
+
+Greg's independent 40-case fixtures/contract map freeze separately from developer examples and before candidate scores. They use fresh per-scenario corpora; those small scoped cases test evidence handling, not global corpus discrimination. Report raw semantic retrieval, accepted evidence hits, answer status and historical guard separately. Do not read expected IDs/dispositions into adapter inputs. Unresolved subject/predicate or presuppositions remain unknown, not guessed from labels. Keep strict original-label grading and adapter-boundary qualifications explicit where they disagree.
+
+Preserve all failures. No fixture, span policy, threshold or adapter revisions after held-out scores. New evidence-handling defects may be fixed with new versioned receipts; no unqualified rerun claimed as unbiased. Runtime captures use only synthetic strings in private scratch and non-disruptive temporary CPU test instances, never unload foreign models or edit shared settings.
