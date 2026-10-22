@@ -1,0 +1,9 @@
+{
+  "schema": "gregory.memory.v02.timestamp-delta.v1",
+  "documents": [
+    "At 10:00:30 I directly observed the vault door standing open.",
+    "At 11:00:30 a direct gauge reading showed 12 percent charge."
+  ],
+  "queries": [],
+  "reason": "Two frozen fixture observation timestamps changed; correct narrative displays before independent scoring. No method or query/label tuning."
+}

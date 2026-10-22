@@ -1,6 +1,6 @@
 """CPU-only synthetic capture in the existing owner-approved qualification environment."""
 from pathlib import Path
-import gzip,hashlib,json,math,struct,sys,time,traceback
+import argparse,gzip,hashlib,json,math,struct,sys,time,traceback
 ROOT=Path(__file__).resolve().parent
 SDKROOT=ROOT.parent/'nomic-benchmark-20261021'
 sys.path.insert(0,str(SDKROOT/'sdk314'));sys.path.insert(0,str(SDKROOT))
@@ -31,7 +31,8 @@ def gguf_metadata(path):
  return result
 
 def main():
- raw=(ROOT/'INPUTS.json').read_bytes();f=json.loads(raw);result={'kind':'GREGORY_MEMORY_V02_REAL_V15_CAPTURE','input_sha256':hashlib.sha256(raw).hexdigest(),'utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'python':sys.version,'initial_loaded':loaded(),'resources_before':resources(),'documents':[],'queries':[],'conditions':'serial CPU-only; exact local GGUF; 512context; full768; one document pass and 3querypasses; explicit single prefixes; no configuration changes'}
+ parser=argparse.ArgumentParser();parser.add_argument('--inputs',default='INPUTS.json');parser.add_argument('--out',default='V02_CAPTURE.json.gz');args=parser.parse_args()
+ raw=(ROOT/args.inputs).read_bytes();f=json.loads(raw);result={'kind':'GREGORY_MEMORY_V02_REAL_V15_CAPTURE','input_sha256':hashlib.sha256(raw).hexdigest(),'utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'python':sys.version,'initial_loaded':loaded(),'resources_before':resources(),'documents':[],'queries':[],'conditions':'serial CPU-only; exact local GGUF; 512context; full768; one document pass and 3querypasses; explicit single prefixes; no configuration changes'}
  if result['initial_loaded']:raise RuntimeError('ABORT existing model instance: no load attempted')
  if result['resources_before']['ram_available_bytes']<6*1024**3:raise RuntimeError('RAM gate')
  path,sha=MODELS['v15'];file=Path(r'C:\Users\Conman\.lmstudio\.internal\bundled-models')/path
@@ -65,7 +66,7 @@ def main():
  except Exception:result['error']=traceback.format_exc()
  finally:
   if model is not None:model.unload();result['own_instance_unloaded']=True
-  result['final_loaded']=loaded();result['resources_after']=resources();out=ROOT/'V02_CAPTURE.json.gz';out.write_bytes(gzip.compress(json.dumps(result,separators=(',',':')).encode(),mtime=0))
+  result['final_loaded']=loaded();result['resources_after']=resources();out=ROOT/args.out;out.write_bytes(gzip.compress(json.dumps(result,separators=(',',':')).encode(),mtime=0))
   print(json.dumps({k:v for k,v in result.items() if k not in ['documents','queries']}));print(json.dumps({'file':out.name,'bytes':out.stat().st_size,'sha256':hashlib.sha256(out.read_bytes()).hexdigest()}))
  if 'error' in result:raise SystemExit(1)
 if __name__=='__main__':main()
