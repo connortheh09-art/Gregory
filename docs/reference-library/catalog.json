@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "purpose": "Engineering evidence catalogue, not a package lock or adoption list.",
+  "updated": "2026-10-27",
+  "projects": [
+    {
+      "id": "kokoro-engine",
+      "repository": "https://github.com/chyinan/Kokoro-Engine",
+      "commit": "30b995c6ce8ce8f7f1841cb65e2f1176d655aaff",
+      "inspected": "2026-10-27",
+      "card": "kokoro-engine.md",
+      "evidence_level": "source-inspected; not runtime-qualified",
+      "license_at_pin": "MIT",
+      "code_vendored": false,
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "b747950fe89e3962504a507c19b66871ddd85fda7e774a4d418f44d77c1cff57",
+          "bytes": 1064,
+          "url": "https://github.com/chyinan/Kokoro-Engine/blob/30b995c6ce8ce8f7f1841cb65e2f1176d655aaff/LICENSE"
+        },
+        {
+          "path": "src-tauri/src/ai/memory.rs",
+          "sha256": "bdf6735b1cc9807d741ba1ce9a5f93312e7ad99dae2b27dd346d061a9e3c6aa8",
+          "bytes": 192954,
+          "url": "https://github.com/chyinan/Kokoro-Engine/blob/30b995c6ce8ce8f7f1841cb65e2f1176d655aaff/src-tauri/src/ai/memory.rs"
+        },
+        {
+          "path": "src-tauri/src/ai/memory_event_ingress.rs",
+          "sha256": "a2660e507f14c35f2688c7029ee3fce6c6998b844ba7be1d07d20f4a1ef24436",
+          "bytes": 9876,
+          "url": "https://github.com/chyinan/Kokoro-Engine/blob/30b995c6ce8ce8f7f1841cb65e2f1176d655aaff/src-tauri/src/ai/memory_event_ingress.rs"
+        },
+        {
+          "path": "src-tauri/src/ai/memory_extractor.rs",
+          "sha256": "70870fb80b34fbdef31722fd3f890fe984c0f7d7dc89fad70ef6a5cb035ae81f",
+          "bytes": 14010,
+          "url": "https://github.com/chyinan/Kokoro-Engine/blob/30b995c6ce8ce8f7f1841cb65e2f1176d655aaff/src-tauri/src/ai/memory_extractor.rs"
+        },
+        {
+          "path": "src-tauri/src/commands/chat.rs",
+          "sha256": "5af37f8d2e031ca612bee46a35d1ea8fbc09dad7113ba301eea37500510710f7",
+          "bytes": 294167,
+          "url": "https://github.com/chyinan/Kokoro-Engine/blob/30b995c6ce8ce8f7f1841cb65e2f1176d655aaff/src-tauri/src/commands/chat.rs"
+        }
+      ]
+    },
+    {
+      "id": "yurios",
+      "repository": "https://github.com/yuri-os/YuriOS",
+      "commit": "da6a973dc451ce97d6534f52bdddc253de491452",
+      "inspected": "2026-10-27",
+      "card": "yurios.md",
+      "evidence_level": "source-inspected; not runtime-qualified",
+      "license_at_pin": "Apache-2.0",
+      "code_vendored": false,
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "bytes": 11357,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/LICENSE"
+        },
+        {
+          "path": "PROVENANCE.md",
+          "sha256": "1df78babc65ba0424d600f69c0e14d72b8acb3c94ebd3580950dac998b754b41",
+          "bytes": 4775,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/PROVENANCE.md"
+        },
+        {
+          "path": "THIRD_PARTY_NOTICES.md",
+          "sha256": "16886362fc311ad1bfc1110f411da603dd03cd82b73dae126a1ebcb87a9303c0",
+          "bytes": 2703,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/THIRD_PARTY_NOTICES.md"
+        },
+        {
+          "path": "yurios/app/memory/store.py",
+          "sha256": "a2b10304f991aaed5740c19fe2cde166b92b2966bd395135457724fe211b157a",
+          "bytes": 25973,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/app/memory/store.py"
+        },
+        {
+          "path": "yurios/mind/budget.py",
+          "sha256": "900708bbdd405705f48d0cdd874620c72c612ab76c0092e88b12d0d1d7c532b6",
+          "bytes": 2739,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/budget.py"
+        },
+        {
+          "path": "yurios/mind/dream.py",
+          "sha256": "7cc1d5bcf7abb996c4ffa34381e7a432db862cdca057f6ac25d042a6468df2d2",
+          "bytes": 10638,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/dream.py"
+        },
+        {
+          "path": "yurios/mind/goals.py",
+          "sha256": "1cc92ab82413a4d66e2bb3dc10fc19f54880fc0d8a44cff9a8fb92793d7d8f4c",
+          "bytes": 38847,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/goals.py"
+        },
+        {
+          "path": "yurios/mind/goalwork.py",
+          "sha256": "ae58f6f693ea01d82975f45a1bb7dcbc756468e63592e8b5b0ef7ed5c4d3adb4",
+          "bytes": 51009,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/goalwork.py"
+        },
+        {
+          "path": "yurios/mind/loop.py",
+          "sha256": "6eb1940777095ed49e44db05fa311e50b84e635819b0bc135309b186dc43f607",
+          "bytes": 59068,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/loop.py"
+        },
+        {
+          "path": "yurios/mind/muse.py",
+          "sha256": "938a476742868f7efb49fdd49191faf7f48e3feb2276a4a7fecd934b1655087d",
+          "bytes": 15397,
+          "url": "https://github.com/yuri-os/YuriOS/blob/da6a973dc451ce97d6534f52bdddc253de491452/yurios/mind/muse.py"
+        }
+      ]
+    },
+    {
+      "id": "airi",
+      "repository": "https://github.com/moeru-ai/airi",
+      "commit": "1884f56565e79a85a07a869033d339964e8e2009",
+      "inspected": "2026-10-27",
+      "card": "airi.md",
+      "evidence_level": "source-inspected; not runtime-qualified",
+      "license_at_pin": "MIT",
+      "code_vendored": false,
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "f334260edf0508041280b534ca9d0abd5a02a9626c1d2e20a556ac4eb72b07f9",
+          "bytes": 1075,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/LICENSE"
+        },
+        {
+          "path": "integrations/minecraft/src/airi/airi-bridge.ts",
+          "sha256": "374303549f94c9b17b45c71ddf3500fe21f68e9cd1dfdd231b0f85113362ad89",
+          "bytes": 9285,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/airi/airi-bridge.ts"
+        },
+        {
+          "path": "integrations/minecraft/src/airi/minecraft-context-service.ts",
+          "sha256": "507127610d47ea215cf2e9b215dcc62d27d1d1dc8396787c4bad3387e54bf5c7",
+          "bytes": 7590,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/airi/minecraft-context-service.ts"
+        },
+        {
+          "path": "integrations/minecraft/src/cognitive/action/task-executor.ts",
+          "sha256": "21b6c51251fab4d32ca291d7762ea8a41b7aed96c934b920c5dd2c04cf3d6142",
+          "bytes": 2628,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/cognitive/action/task-executor.ts"
+        },
+        {
+          "path": "integrations/minecraft/src/cognitive/event-bus.ts",
+          "sha256": "d93e1fd1a4d13221c9f280c53304b0b3632a784b594f914522a9a8a6cc43e1e6",
+          "bytes": 5027,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/cognitive/event-bus.ts"
+        },
+        {
+          "path": "integrations/minecraft/src/cognitive/index.ts",
+          "sha256": "49ee7e59a13edb039a9dd5d551564eb4f1b1dac389bddd6062d2a02d9be9f46e",
+          "bytes": 6071,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/cognitive/index.ts"
+        },
+        {
+          "path": "integrations/minecraft/src/cognitive/perception/pipeline.ts",
+          "sha256": "4aeb1b8aa7a0466347d4681236a68309756cbc6333a1833e87c05101a46405fa",
+          "bytes": 1330,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/integrations/minecraft/src/cognitive/perception/pipeline.ts"
+        },
+        {
+          "path": "packages/stage-ui/src/stores/memory.ts",
+          "sha256": "db316dcf7269491ff7fec7d85929b647cd52c3290ab14161af306b801f250ed1",
+          "bytes": 5021,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/packages/stage-ui/src/stores/memory.ts"
+        },
+        {
+          "path": "packages/stage-ui/src/tools/memory.ts",
+          "sha256": "848a8310d480cb4cfc1d0c4cc2698da84639599e46a9de1eebf265a78bacc1a2",
+          "bytes": 4885,
+          "url": "https://github.com/moeru-ai/airi/blob/1884f56565e79a85a07a869033d339964e8e2009/packages/stage-ui/src/tools/memory.ts"
+        }
+      ]
+    },
+    {
+      "id": "super-agent-party",
+      "repository": "https://github.com/heshengtao/super-agent-party",
+      "commit": "3aac964122415fe289a1b8af1000474b397c916b",
+      "inspected": "2026-10-27",
+      "card": "super-agent-party.md",
+      "evidence_level": "source-inspected; not runtime-qualified",
+      "license_at_pin": "AGPL-3.0 license text",
+      "code_vendored": false,
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "478067ec0fc03b0f1fc192293b6d6f37fb2b0ce7ba6531a5a6753c1cd7289ea6",
+          "bytes": 34500,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/LICENSE"
+        },
+        {
+          "path": "py/agent_tool.py",
+          "sha256": "8561cf98a5fc65066e0ecba638a34d41954c1f13543296bc539aed1622e37898",
+          "bytes": 1950,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/py/agent_tool.py"
+        },
+        {
+          "path": "py/discord_bot_manager.py",
+          "sha256": "0d5f01524faa3d65cdafb45cbf6c444dcdcb75bc2d9e0f546a953dfb9c7d308d",
+          "bytes": 20469,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/py/discord_bot_manager.py"
+        },
+        {
+          "path": "py/extensions.py",
+          "sha256": "1eff723028cc38570267801b5f8eead2fb872b76fceef330e9083d63c00d047c",
+          "bytes": 23601,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/py/extensions.py"
+        },
+        {
+          "path": "py/mcp_clients.py",
+          "sha256": "eb9b4a6c02260a64e9656935166dc391a49f56758d1ddb39a66ce13fb51adcb2",
+          "bytes": 7674,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/py/mcp_clients.py"
+        },
+        {
+          "path": "py/telegram_bot_manager.py",
+          "sha256": "b8c5981a2909bd860a2221a6634ecc3cfabfcf50b9068f5d602fb64f1e59e351",
+          "bytes": 5515,
+          "url": "https://github.com/heshengtao/super-agent-party/blob/3aac964122415fe289a1b8af1000474b397c916b/py/telegram_bot_manager.py"
+        }
+      ]
+    },
+    {
+      "id": "neuro-sdk",
+      "repository": "https://github.com/VedalAI/neuro-sdk",
+      "commit": "0cad33ac692f6cc90d36747fea9bbc53ca34b97a",
+      "inspected": "2026-10-27",
+      "card": "neuro-sdk.md",
+      "evidence_level": "source-inspected; isolated handler probes only",
+      "license_at_pin": "MIT",
+      "code_vendored": false,
+      "files": [
+        {
+          "path": "API/BEST_PRACTICES.md",
+          "sha256": "50e6eb94fdedd8338b81fa96fb6675f538c49720032c68d10b4480f777b3bf29",
+          "bytes": 6220,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/API/BEST_PRACTICES.md"
+        },
+        {
+          "path": "API/SPECIFICATION.md",
+          "sha256": "9889bddb0e6687358fc3e2a587479e7d78fc1001887494072b7ebc8f5a963f27",
+          "bytes": 11993,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/API/SPECIFICATION.md"
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "7dd993eadd06df9f3206c6e7a401bd0373e0db91f5e58aefd4fe6ca10ed71737",
+          "bytes": 1065,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/LICENSE.md"
+        },
+        {
+          "path": "Randy/index.ts",
+          "sha256": "78f939eda06b2d9e9bb5ddb49de99e0b86416293e83099267496e01a6e182c26",
+          "bytes": 3842,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/Randy/index.ts"
+        },
+        {
+          "path": "Unity/Assets/Actions/ActionWindow.cs",
+          "sha256": "5cc7ec19ba3dbfb1e5cc140f5f4f286d676ea69bd63933b0b590bdf572aed600",
+          "bytes": 11145,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/Unity/Assets/Actions/ActionWindow.cs"
+        },
+        {
+          "path": "Unity/Assets/Websocket/CommandHandler.cs",
+          "sha256": "f8c4aabca39464a400bf30fc390b4cc5d480349f0297c87166cb20de2f3f3808",
+          "bytes": 2522,
+          "url": "https://github.com/VedalAI/neuro-sdk/blob/0cad33ac692f6cc90d36747fea9bbc53ca34b97a/Unity/Assets/Websocket/CommandHandler.cs"
+        }
+      ]
+    }
+  ]
+}

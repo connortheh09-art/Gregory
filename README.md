@@ -36,6 +36,9 @@ tools/       helper scripts (start/stop, QA)
 
 ## Notes
 
+- **Core engineering:** consult the [source-pinned reference library](docs/reference-library/README.md)
+  before substantial new subsystems. Borrow focused patterns; keep Gregory Core authoritative.
+
 - Nothing in here should contain tokens, keys, or machine-specific credentials. `.gitignore` covers
   the usual suspects; scrub before committing.
 - GMod leaks RAM over long sessions — the bridge is expected to run with a periodic restart.
