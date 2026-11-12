@@ -1,0 +1,545 @@
+{
+ "about": "Receiver rule for the Lua drive verb (docs/GMOD_CONTROLLER.md, 'Receiver rule'). Shared by the Python model in test_gmod_controller.py and the Lua fixture; steps run after the existing envelope checks (identity, epoch, expiry, session:seq dedup). The envelope session plays no part in the fence; `ctl` (controller run id) does. 'advance' moves the game clock in seconds.",
+ "cases": [
+  {
+   "name": "stop fences a delayed renewal of the released generation",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 2
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "released_generation"
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 10,
+    "gen": 1,
+    "stopGen": 2
+   }
+  },
+  {
+   "name": "reordered older generation is stale",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 3,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 2,
+      "lease": 1.5
+     },
+     "expect": "stale_generation"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 10,
+    "gen": 3,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "new intent after a stop is accepted",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 2
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 3,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 10,
+    "gen": 3,
+    "stopGen": 2
+   }
+  },
+  {
+   "name": "repeated stop is idempotent and fences its own generation",
+   "steps": [
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 2
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 2
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 2,
+      "lease": 1.5
+     },
+     "expect": "released_generation"
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 10,
+    "gen": 0,
+    "stopGen": 2
+   }
+  },
+  {
+   "name": "late older stop does not lower the fence",
+   "steps": [
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 4
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 2
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 3,
+      "lease": 1.5
+     },
+     "expect": "released_generation"
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 10,
+    "gen": 0,
+    "stopGen": 4
+   }
+  },
+  {
+   "name": "legacy wait without ctl releases but does not fence",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait"
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 10,
+    "gen": 1,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "lease expiry releases without a stop",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 0.5
+     },
+     "expect": "applied"
+    },
+    {
+     "advance": 0.6
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 10,
+    "gen": 1,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "lease is clamped to two seconds",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 30
+     },
+     "expect": "applied"
+    },
+    {
+     "advance": 2.01
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 10,
+    "gen": 1,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "retired run cannot undo a newer run's stop (review R1)",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 11,
+      "driveGen": 1
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "retired_controller"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 9,
+      "lease": 1.5
+     },
+     "expect": "retired_controller"
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 11,
+    "gen": 0,
+    "stopGen": 1
+   }
+  },
+  {
+   "name": "legitimate restart: a newer run releases the old hold and starts a fresh fence",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 5,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 6
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 11,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 11,
+    "gen": 1,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "retired run's stop cannot stop the newer run",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 11,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 10,
+      "driveGen": 9
+     },
+     "expect": "retired_controller"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 11,
+    "gen": 1,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "restart with the dead run's newer hold still in transit (review R4)",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 1,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 2,
+      "driveGen": 1
+     },
+     "expect": "released"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 1,
+      "gen": 2,
+      "lease": 1.5
+     },
+     "expect": "retired_controller"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 2,
+      "gen": 2,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 1,
+      "gen": 3,
+      "lease": 1.5
+     },
+     "expect": "retired_controller"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 2,
+    "gen": 2,
+    "stopGen": 1
+   }
+  },
+  {
+   "name": "malformed controller ids, generations and leases are refused",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "gen": 1,
+      "lease": 1
+     },
+     "expect": "invalid_controller"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": "10",
+      "gen": 1,
+      "lease": 1
+     },
+     "expect": "invalid_controller"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 0,
+      "gen": 1,
+      "lease": 1
+     },
+     "expect": "invalid_controller"
+    },
+    {
+     "action": {
+      "action": "wait",
+      "ctl": 1.5,
+      "driveGen": 3
+     },
+     "expect": "invalid_controller"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 0,
+      "lease": 1
+     },
+     "expect": "invalid_generation"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1.5,
+      "lease": 1
+     },
+     "expect": "invalid_generation"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": "1",
+      "lease": 1
+     },
+     "expect": "invalid_generation"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1
+     },
+     "expect": "invalid_lease"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": -1
+     },
+     "expect": "invalid_lease"
+    }
+   ],
+   "final": {
+    "active": false,
+    "ctl": 0,
+    "gen": 0,
+    "stopGen": 0
+   }
+  },
+  {
+   "name": "an invalid newer-run hold does not retire the current run",
+   "steps": [
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 10,
+      "gen": 1,
+      "lease": 1.5
+     },
+     "expect": "applied"
+    },
+    {
+     "action": {
+      "action": "drive",
+      "ctl": 11,
+      "gen": 0,
+      "lease": 1.5
+     },
+     "expect": "invalid_generation"
+    }
+   ],
+   "final": {
+    "active": true,
+    "ctl": 10,
+    "gen": 1,
+    "stopGen": 0
+   }
+  }
+ ]
+}
