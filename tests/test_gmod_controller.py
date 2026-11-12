@@ -588,6 +588,42 @@ class InflightFirstPublication(Fence):
         hold = ctl.set_intent({'forward': 1})
         self.assertTrue(hold.applied)  # historical, genuinely matched application is kept
 
+    def test_staged_positive_evidence_survives_tail_eviction(self):
+        for stop in (False, True):
+            with self.subTest(stop=stop):
+                ctl, box, game, clock = make(run_id=7)
+
+                def publisher(action, mode):
+                    result = box(action, mode)
+                    game.poll()
+                    ctl.observe(game.state())  # applied / acknowledged
+                    if not stop:
+                        clock.t += ctl.policy.lease + .1
+                    for _ in range(40):  # far more samples than the staged tail holds
+                        clock.t += .05
+                        ctl.observe(game.state())
+                    return result
+                ctl._write = publisher
+                receipt = ctl.stop() if stop else ctl.set_intent({'forward': 1})
+                self.assertEqual(ctl.retired, '')
+                self.assertTrue(receipt.acknowledged if stop else receipt.applied)
+                self.assertEqual(ctl._staged_positive, {})
+
+    def test_unsent_reuse_discards_staged_positive_evidence(self):
+        ctl, box, game, clock = make(run_id=7)
+
+        def publisher(action, mode):
+            game.rx.ctl, game.rx.gen, game.rx.active, game.rx.expires = 7, action['gen'], True, clock() + 1.5
+            for _ in range(20):
+                clock.t += .01
+                ctl.observe(game.state())
+            return FAILED
+        ctl._write = publisher
+        hold = ctl.set_intent({'forward': 1})
+        self.assertEqual(ctl.retired, 'controller_run_reused')
+        self.assertFalse(hold.applied)
+        self.assertEqual(ctl._staged_positive, {})
+
 
 class Binding(Fence):
     """Evidence and fences belong to one controller run and one actor/world (review R1-R3)."""

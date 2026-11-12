@@ -138,7 +138,7 @@ class DirectController:
         self._sent = False              # some envelope carrying our run id left the writer
         self._pending = 0               # attempts carrying our run id handed to the publisher, unresolved
         self._seen_unsent = False       # the game showed our id while nothing was known sent
-        self._staged = []               # telemetry with our id awaiting that judgment (bounded)
+        self._staged_positive = {}      # per receipt, the first sample proving it, awaiting that judgment
 
     # -- decisions -------------------------------------------------------------
     def set_intent(self, params, duration=None):
@@ -271,7 +271,7 @@ class DirectController:
 
     # -- internals (state lock held unless noted) -------------------------------
     def _retire(self, reason):
-        self.retired, self._staged = reason, []
+        self.retired, self._staged_positive = reason, {}
         self.intent = self._renew_at = self._release_at = None
         self.owner = None
 
@@ -317,9 +317,22 @@ class DirectController:
         if not self._sent:
             # Our id in the game before any attempt carrying it is known to have left: whether
             # it is ours is decided when that attempt resolves (_record). Stage, don't commit.
-            self._staged = (self._staged + [fb])[-16:]
+            self._stage_positive(fb)
             return
         self._attribute(fb, now)
+
+    def _stage_positive(self, fb):
+        # Application/acknowledgment are sticky facts, so one positive sample per receipt is all
+        # that needs keeping; later samples cannot evict it. Anything else (e.g. a released
+        # generation still held) is judged on the next live sample instead of replayed stale.
+        h, r = self.hold, self.release
+        if h is not None and fb.identity == h.binding and fb.active and fb.gen == h.generation:
+            self._staged_positive.setdefault(id(h), (h, fb))
+        if (r is not None and not r.superseded and fb.identity == r.binding
+                and fb.stop_gen >= r.generation):
+            self._staged_positive.setdefault(id(r), (r, fb))
+        if len(self._staged_positive) > 8:  # receipts replaced during judgment: drop the oldest
+            self._staged_positive.pop(next(iter(self._staged_positive)))
 
     def _attribute(self, fb, now):
         # fb carries this run's id and its sender is established: application/acknowledgment.
@@ -372,8 +385,8 @@ class DirectController:
             self._pending -= 1
             if outcome not in NOT_SENT and not self._sent:
                 self._sent = True
-                staged, self._staged = self._staged, []
-                for fb in staged:  # our envelope may have landed first: commit, in order
+                positive, self._staged_positive = self._staged_positive, {}
+                for _, fb in positive.values():  # our envelope may have landed before its ACK
                     self._attribute(fb, now)
             elif outcome in NOT_SENT and self._seen_unsent and not self._sent and not self._pending:
                 # The game showed our id, yet every attempt carrying it definitely never left:
