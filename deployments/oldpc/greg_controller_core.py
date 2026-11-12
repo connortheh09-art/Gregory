@@ -189,6 +189,11 @@ class DirectController:
         self._service(self.policy.stop_wait)
         return receipt
 
+    def refusal(self):
+        """Why a decision made now would be refused; '' when it would be accepted."""
+        with self._state:
+            return self._refusal(self.clock())
+
     def allow_tasks(self):
         """Core's explicit decision to let route helpers write again after a stop."""
         with self._state:
