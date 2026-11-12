@@ -71,6 +71,28 @@ def activity_intents(offered):
     if ids:choices.append(obj(dict(action=enum(['game_activity']),choice=obj(dict(activity=enum(['spawn']),id=enum(ids))))))
     return choices
 
+# Direct body control in a game-neutral vocabulary. The adapter offers it and maps it to inputs.
+CONTROL_MOVES=('none','forward','back','left','right','forward_left','forward_right','back_left','back_right')
+CONTROL_PACES=('sneak','walk','jog','run')
+CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_right','up','down','level')
+CONTROL_HINT=('DIRECT CONTROL (your own body, no task needed): {"action":"control","command":"drive","move":"forward","pace":"walk","seconds":3}. '
+    'move is relative to your facing. look P#/D# keeps facing that person/place (with forward you walk there and stop near it); '
+    'turn_*, up/down/level turn once. jump tap|hold, crouch, use (press once), fly on|off, vertical up|down while flying. '
+    'Lasts seconds (1-30); a new control replaces it; {"action":"control","command":"stop"} stops now. Control ends any game task; tasks suit long trips. ')
+
+def control_intents(control,players=(),destinations=()):
+    """Drive/stop branches when the adapter offers control; look targets are this turn's labels."""
+    if not isinstance(control,dict):return []
+    limit=control.get('max_seconds')
+    limit=limit if type(limit) is int and 1<=limit<=30 else 30
+    props=dict(action=enum(['control']),command=enum(['drive']),move=enum(CONTROL_MOVES),pace=enum(CONTROL_PACES),
+               look=enum([*players,*destinations,*CONTROL_TURNS]),jump=enum(['none','tap','hold']),
+               crouch=dict(type='boolean'),use=dict(type='boolean'))
+    fly=[v for v in ('on','off') if v in (control.get('fly') or ())]
+    if fly:props.update(fly=enum(fly),vertical=enum(['up','down']))
+    props['seconds']=dict(type='integer',minimum=1,maximum=limit)
+    return [obj(props,['action','command','move','seconds']),obj(dict(action=enum(['control']),command=enum(['stop'])))]
+
 class TurnChoices:
     """Owns one immutable native offer and its private model-facing labels."""
     hint="Use this turn's D/P targets and T1 task label exactly. "
@@ -97,7 +119,7 @@ class TurnChoices:
         from greg_game_tasks import GameTasks
         task=visible.get('current_task') or {}
         kinds=GameTasks.allowed_kinds(bool(visible.get('navigation_available')),task,bool(visible.get('players')),visible.get('heading') is not None)
-        destinations=[e['id'] for e in visible.get('destinations',[])]
+        destinations=[e['id'] for e in visible.get('destinations',[])];shown=list(destinations)
         previous=(task.get('target') or {}).get('id')
         if task.get('kind')=='visit' and previous in self.destinations and previous not in destinations:destinations.append(previous)
         players=[e['id'] for e in visible.get('players',[])]
@@ -126,7 +148,7 @@ class TurnChoices:
                 if internal or kind=='settle':required.append('task_id')
             if kind=='settle' and not self.task_id:continue
             choices.append(obj(props,required))
-        if not internal:choices.extend(activity_intents(offered))
+        if not internal:choices.extend(activity_intents(offered)+control_intents(offered.get('control'),players,shown))
         if screen:choices.append(obj(dict(action=enum(['inspect_screen']))))
         if listen:choices.append(obj(dict(action=enum(['voice_turn']),kind=enum(['listen']))))
         return envelope(choices,memory_ids)
@@ -135,6 +157,11 @@ class TurnChoices:
         # Validate first, including exact enums. No fuzzy match or raw-ID fallback.
         validate(intent,schema['properties']['intent'])
         result=deepcopy(intent)
+        if isinstance(result,dict) and result.get('action')=='control':
+            look=result.get('look')
+            if look in self.players:result['look']=dict(player=self.players[look])
+            elif look in self.destinations:result['look']=dict(destination=self.destinations[look])
+            return result
         if not isinstance(result,dict) or result.get('action')!='game_task':return result
         if 'target' in result:
             table=self.players if result['kind'] in {'follow','approach'} else self.destinations

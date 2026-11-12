@@ -51,6 +51,8 @@ CATALOG = None
 CHAT_MEMORY = None
 PLAYERCORE = None
 _COMMAND_OBSERVER = None
+# gmod_controller.GModControl, set by the one-writer integration; None = control never offered.
+DIRECT_CONTROL = None
 
 PORT_NOTE = "file transport (no listener)"
 
@@ -1129,6 +1131,40 @@ def actionable(state: dict | None, now: float) -> bool:
                 and isinstance(state.get("controlEpoch"), (int, float)))
 
 
+def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log) -> dict:
+    """Core's direct-control decision, applied once at publication (docs/GMOD_CONTROLLER.md).
+
+    The latest decision wins: an accepted drive or stop ends the current game task. A refusal
+    changes nothing, replaces the spoken claim and is not a task refusal (no recovery turns).
+    """
+    intent = row['game_intent']
+    command = str(intent.get('command', ''))[:16]
+    try:
+        if row['request'].get('game_attention'):
+            raise ValueError('control is offered on owner turns only')
+        if control is None:
+            raise ValueError('direct control unavailable')
+        if command != 'stop' and not (row.get('activity_options') or {}).get('control'):
+            raise ValueError('control was not offered')
+        detail = control.apply(intent, row.get('game_task_view'), latest)
+    except ValueError as exc:
+        reason = str(exc)[:160]
+        if authority is not None:
+            authority.note(latest, 'control_refused', command=command, reason=reason[:120])
+        log('CORE_CONTROL_REFUSED ' + json.dumps(dict(command=command, reason=reason)))
+        return dict(row, say="I couldn't stop just now." if command == 'stop' else "I can't move like that right now.",
+                    task_outcome=dict(verdict='refused', kind='control_' + command, reason=reason))
+    if game_tasks is not None:
+        game_tasks.invalidate()
+    if runtime is not None:
+        runtime.end_goal('abandoned', 'core_direct_control')
+    if authority is not None:
+        authority.note(latest, 'control', command=command, generation=detail['generation'],
+                       qualification='requested_not_confirmed')
+    log('CORE_CONTROL ' + json.dumps(dict(command=command, **detail)))
+    return dict(row, task_outcome=dict(verdict='accepted', kind='control_' + command, **detail))
+
+
 def clear(state: dict, direction: str) -> float:
     """Prefer the CLIENT hull clearance: that is the measure the move gate enforces."""
     cl = (state or {}).get("clearance")
@@ -1918,7 +1954,8 @@ def _run_bridge(a, ap, capture_gate=None):
             if game_authority is not None and latest:
                 game_authority.observe(latest,CATALOG.observations(latest),PLAYERCORE.memory.recent_events(latest.get('map',''),4))
                 game_authority.offer(latest,CATALOG,PLAYERCORE.memory.landmarks(latest.get('map','')),
-                    ((game_tasks.snapshot() or {}).get('navigation_available',False) if game_tasks else latest.get('map')==PLAYERCORE.graph.map),now)
+                    ((game_tasks.snapshot() or {}).get('navigation_available',False) if game_tasks else latest.get('map')==PLAYERCORE.graph.map),now,
+                    control=DIRECT_CONTROL.offer(latest) if DIRECT_CONTROL is not None else None)
             if game_screen is not None and supervised is not None and not supervised_draining:
                 supervised.consider_game_feedback()
             if supervised is not None:
@@ -2089,8 +2126,14 @@ def _run_bridge(a, ap, capture_gate=None):
                     tracker.pending_speech_trace = trace
                     if game_tasks is not None and row.get('game_intent') is not None:
                         stamp=row['request'].get('delivery_stamp')
-                        if ((row['request'].get('voice_metadata') or row['request'].get('game_attention')) and voice_session is not None
-                                and stamp==voice_session.stamp()):
+                        current=bool((row['request'].get('voice_metadata') or row['request'].get('game_attention')) and voice_session is not None
+                                and stamp==voice_session.stamp())
+                        if current and row['game_intent'].get('action')=='control':
+                            row=apply_control(row,latest,DIRECT_CONTROL,game_tasks,PLAYERCORE,game_authority,log)
+                            if row['task_outcome']['verdict']=='accepted':
+                                tracker.decision_result(trace,accepted=True,reason='core_conversation_control',
+                                    parsed_summary=dict(kind=row['task_outcome']['kind']),activate=False)
+                        elif current:
                             try:
                                 if row['game_intent'].get('action')=='game_activity':
                                     if (row.get('game_task_view') or {}).get('revision')!=(game_tasks.snapshot() or {}).get('revision'):
@@ -2103,6 +2146,7 @@ def _run_bridge(a, ap, capture_gate=None):
                                         raise ValueError('catalog item no longer available')
                                     if proposal['choice']['activity'] in {'tour','explore','rest'}:
                                         game_tasks.invalidate();PLAYERCORE.end_goal('abandoned','core_activity_change')
+                                        if DIRECT_CONTROL is not None:DIRECT_CONTROL.yield_to_task()
                                     voice_activity=(tuple(latest.get(k) for k in ('map','bridgeSession','controlEpoch')),now,chosen,announcement)
                                     game_authority.note(latest,'choice',choice=proposal['choice'],intention=row['say'][:160],qualification='chosen_not_executed')
                                     verdict='accepted'
@@ -2113,6 +2157,7 @@ def _run_bridge(a, ap, capture_gate=None):
                                     verdict=game_tasks.apply(row['game_intent'],row.get('game_task_view'),latest,PLAYERCORE,now,
                                         screen_observations=row.get('screen_observations',[]),
                                         screen_session=game_screen.buffer.session if game_screen else None)
+                                    if verdict=='accepted' and DIRECT_CONTROL is not None:DIRECT_CONTROL.yield_to_task()
                                 ready=None
                                 row['task_outcome']=dict(verdict=verdict,kind=row['game_intent'].get('kind'))
                                 if verdict in {'accepted','continued'}:

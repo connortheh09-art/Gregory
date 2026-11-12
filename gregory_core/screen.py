@@ -161,7 +161,7 @@ def generate_with_screen(provider, profile, prompt, source, session, deadline, r
         if isinstance(intent,dict) and intent.get('action')=='inspect_screen':
             raise ValueError('screen follow-up cannot request another inspection')
         # An explicitly trusted game turn may return a proposal, never execute it here.
-        if not (allow_game_task and isinstance(intent,dict) and (intent.get('action') in {'game_task','game_activity'} or response_schema is not None and intent.get('action')=='voice_turn')):
+        if not (allow_game_task and isinstance(intent,dict) and (intent.get('action') in {'game_task','game_activity','control'} or response_schema is not None and intent.get('action')=='voice_turn')):
             receipts[-1]['followup_intent_discarded']=True
             result=dict(result);result.pop('intent',None)
     return result

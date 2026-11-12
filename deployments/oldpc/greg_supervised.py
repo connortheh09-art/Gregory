@@ -295,7 +295,7 @@ class SupervisedLane:
         choice=intent.get('choice') if isinstance(intent.get('choice'),dict) else {}
         verdict=outcome.get('verdict','unchanged')
         receipt=dict(id=uuid4().hex,status='accepted' if verdict=='accepted' else 'refused' if verdict=='refused' else 'no_change',
-            kind=intent.get('kind') or choice.get('activity'),reason=str(outcome.get('reason') or ('no_new_action_selected' if verdict!='accepted' else 'task_accepted_only'))[:160],
+            kind=intent.get('kind') or choice.get('activity') or ('control_'+str(intent.get('command')) if intent.get('action')=='control' else None),reason=str(outcome.get('reason') or ('no_new_action_selected' if verdict!='accepted' else 'task_accepted_only'))[:160],
             world_result='not_observed',
             target=str(intent.get('target') or choice.get('id') or '')[:80],
             revision=view.get('revision'),binding=list(view.get('binding',())),
@@ -788,6 +788,7 @@ def bounded_turn_prompt(prefix,question,live,evidence,dialogue,*,internal=False,
     """Keep executable context/current question whole; evict optional older dialogue first."""
     from copy import deepcopy
     from greg_game_tasks import GameTasks
+    from gregory_core.decision_contract import CONTROL_HINT
     live=deepcopy(live)
     view=deepcopy(task_view)
     # Coordinates stay with the controller. The model chooses exact offered IDs,
@@ -805,7 +806,9 @@ def bounded_turn_prompt(prefix,question,live,evidence,dialogue,*,internal=False,
     tail='\nClaim completed actions only with feedback. No unsupported controls. Older conversation may exist outside this window.'
     def render():
         task=GameTasks.instruction(view,internal=internal) if view else ''
-        return prefix+task+head+'\nLIVE_ACTION_RECEIPTS (requests are not confirmed success):'+json.dumps(live,separators=(',',':'))+tail
+        # Rendered exactly when the decision schema offers control (owner turns, offer kept).
+        control=CONTROL_HINT if view and not internal and (live.get('activity_options') or {}).get('control') else ''
+        return prefix+task+control+head+'\nLIVE_ACTION_RECEIPTS (requests are not confirmed success):'+json.dumps(live,separators=(',',':'))+tail
     # Reserve the actual empty dialogue suffix, not 300 unusable characters.
     essential_limit=5800-len('\nRECENT_DIALOGUE:[]')
     essential=render()
@@ -820,6 +823,8 @@ def bounded_turn_prompt(prefix,question,live,evidence,dialogue,*,internal=False,
             view['current_task'].pop('feedback')
         elif view and 'version' in (view.get('current_task') or {}):view['current_task'].pop('version')
         elif view and 'id' in (view.get('last_refusal') or {}):view['last_refusal'].pop('id')
+        # Last resort before failing the turn: no control offer this turn rather than no turn.
+        elif (live.get('activity_options') or {}).get('control'):live['activity_options'].pop('control')
         else:break
         essential=render()
     if len(essential)>essential_limit:raise ValueError('essential game context exceeds turn budget')
@@ -922,13 +927,15 @@ class CoreGameAuthority:
             if tuple(state.get(k) for k in ('map','bridgeSession','controlEpoch'))!=self.world:return {}
             # Compact, complete records; no raw image, private inbox or full nav route.
             return dict(recent=list(self.events)[-2:],last_spawn_request=getattr(self,'last_spawn',None),server_observations=getattr(self,'observations',{}),activity_options=self.options)
-    def offer(self,state,catalog,landmarks,navigation_available,now):
+    def offer(self,state,catalog,landmarks,navigation_available,now,control=None):
         if now-self.options_at<3:return
         choices=[dict(id=e['id'],name=str(e.get('name',''))[:40]) for e in catalog.choices(state)[:2]]
         spots=[dict(name=str(e['name'])[:100]) for e in list(landmarks)[:2]]
         with self.lock:
             self.options_at=now
             self.options=dict(binding=list(self.world),spawn_choices=choices,landmarks=spots,navigation_available=bool(navigation_available))
+            # Direct control offer from the adapter (gmod_controller.GModControl.offer); absent = not offered.
+            if isinstance(control,dict):self.options['control']=json.loads(json.dumps(control))
     def validate_activity(self,proposal,offered,state):
         if tuple(offered.get('binding',()))!=tuple(state.get(k) for k in ('map','bridgeSession','controlEpoch')):
             raise ValueError('stale activity decision')

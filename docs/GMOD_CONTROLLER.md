@@ -1,10 +1,15 @@
-# gmod_controller: Slice 1 (stop/release core) and the Lua drive/noclip spec
+# gmod_controller: Slice 1 (stop/release core), Slice 2 (Core's control decision) and the Lua drive/noclip spec
 
 Status: revised candidate (R3) after Gordon's reviews. Those reviews found that fences and
 evidence were not scoped to a controller run or actor (R1–R3), and that run ids from the wall
 clock could not order a restart against a dead run's in-transit traffic (R4). Python only. It is not wired into `gmod_bridge.py`,
 there is no Lua change, and no game behaviour is claimed. The fixtures model the game; they pin
 semantics for the Lua work and the later live checks.
+
+Slice 2 adds the typed `control` decision Gregory uses to move his own body. It is wired into
+`gmod_bridge.py` only through the `DIRECT_CONTROL` seam, which stays `None` until the
+one-writer integration builds the controller, so nothing is offered to the model or sent to
+the game yet.
 
 ## Controller runs
 
@@ -53,6 +58,9 @@ Every controller instance (one per bridge run) has an ordered id `ctl`, and both
 - `deployments/oldpc/gmod_controller.py`: the GMod adapter (the API Core sees). Validates drive
   decisions, encodes `drive`/`wait` envelopes, reads the Lua `drive` telemetry block, and
   adapts `write_cmd` publication results.
+- `gregory_core/decision_contract.py`: the game-neutral control vocabulary
+  (`CONTROL_MOVES/PACES/TURNS`, `control_intents`, `CONTROL_HINT`) offered to the model. A
+  future adapter maps the same decision to its own inputs.
 - Lua `drive` module (Gordon): applies holds in CreateMove, enforces the receiver rule, reports
   telemetry. Specified below.
 
@@ -101,6 +109,54 @@ Every controller instance (one per bridge run) has an ordered id `ctl`, and both
 All numbers are proposals to validate live, not locked settings (`LeasePolicy`). If Python
 dies mid-hold, Gregory keeps moving at most one lease (≤1.5s, plus one 0.25s mailbox poll).
 
+## Slice 2: Core's control decision
+
+Gregory moves by choosing a typed `control` intent in the same constrained decision that
+carries his reply. No task is needed.
+
+```json
+{"action": "control", "command": "drive", "move": "forward", "pace": "walk", "look": "P1",
+ "jump": "none", "crouch": false, "use": false, "fly": "on", "vertical": "up", "seconds": 5}
+{"action": "control", "command": "stop"}
+```
+- **Contract** (`decision_contract.control_intents`). Required: `action`, `command`, `move`,
+  `seconds`. Optional: `pace` (default walk), `look` (absent keeps the view), `jump`,
+  `crouch`, `use`, and `fly`/`vertical`, which exist only when the offer includes flight.
+  `move` is none/forward/back/left/right or a diagonal (`forward_left`, ...), relative to the
+  view. `pace` is sneak/walk/jog/run. `look` is one of this turn's `P#`/`D#` labels (only rows
+  shown in the prompt) or turn_left/turn_right/turn_around/slight_left/slight_right/up/down/level.
+  `seconds` is 1..the offer's `max_seconds` (at most 30). `decode` maps `P#` to
+  `{"player": alias}` and `D#` to `{"destination": token}`, with no fuzzy match or raw ids.
+- **When it is offered.** On owner turns only, and only when the adapter's offer is in the
+  rendered turn context. `CONTROL_HINT` renders exactly when the schema offers control. Under
+  prompt-budget pressure the offer is evicted last, just before the turn would fail, and the
+  schema then stops offering control. A screen follow-up keeps a control proposal in trusted
+  game scope, as it does tasks.
+- **Offer** (`GModControl.offer(state)` → `CoreGameAuthority.offer(..., control=)` →
+  `activity_options.control`): `{mode, active, seconds_left, max_seconds, fly?}`. It is absent
+  whenever the controller would refuse a decision: no run id, retired, stale or non-actionable
+  telemetry, or no `drive` capability (old Lua). `fly: ["on", "off"]` is offered in walk or
+  noclip mode unless this world refused noclip (`drive.noclip.state == "refused"`).
+- **Mapping** (`gmod_controller.translate`, at publication). pace → `speed` .25/.5/.75/1.0 of
+  run speed. move → `forward`/`right` ±1, diagonals normalized. turn_* → absolute `yaw` =
+  heading at publication +90/−90/180/+30/−30; up/down/level → `pitch` −45/45/0. `P#` →
+  `look_steamid` (the player must be offered *and* present now, via `GameTasks.people`) with an
+  80 u stand-off. `D#` → `look_point`, the offered destination's position, with a 40 u
+  stand-off. fly on/off → `mode` noclip/walk. vertical → `up` ±1 only if flying after this
+  decision; otherwise it is listed in `ignored`. jump/crouch/use pass through.
+- **Publication** (`gmod_bridge.apply_control`, once per decision). It needs a current voice
+  delivery stamp (as tasks do), an owner turn, `DIRECT_CONTROL`, and for a drive the offer in
+  the decision's options and a view binding that matches the live world. A stop is never
+  refused for staleness.
+  - *Accepted* drive or stop: the current game task is invalidated and PlayerCore's goal ends
+    (`core_direct_control`). The authority notes `control` with
+    `qualification: requested_not_confirmed`. Game evidence still comes only from telemetry.
+  - *Refused*: nothing changes, the spoken line is replaced, and the authority notes
+    `control_refused`. It is not a task refusal, so it starts no recovery turns.
+  - *The latest decision wins.* An accepted new task, or a tour/explore/rest activity, calls
+    `yield_to_task()`: a held drive is stopped (`task_selected`) and route helpers may write
+    again (`allow_tasks`). Continuing a task does not.
+
 ## Wire contract
 
 Hold, envelope `mode: "direct"`:
@@ -115,7 +171,11 @@ Hold, envelope `mode: "direct"`:
   walk at stock speeds).
 - `look` is optional. It gives an absolute yaw (0..360) and/or pitch (-89..89) target, with
   `rate` 30..720 °/s. If it's absent, drive does not touch the view.
+- Instead of yaw/pitch, `look` may track a target (Slice 2):
+  `{"steamid": "STEAM_0:1:1000", "rate": 180.0, "near": 80.0}` or
+  `{"point": [x, y, z], "rate": 180.0, "near": 40.0}`. `near` is optional (0..512 u).
 - `jump`: `none`/`tap`/`hold`. `crouch` is a bool. `mode` is optional: `walk`/`noclip`.
+  `use: true` appears only when set. Slice 1 envelopes are unchanged byte for byte.
 - Every renewal re-sends the complete intent, so any single envelope fully describes the hold.
 
 Release, envelope `mode: "stop"` (TickWriter lets it preempt cadence):
@@ -176,6 +236,15 @@ a legitimate restart, a retired run's stop, and malformed ids.
   `greg_locomotion.lua:185`. Clear only the buttons drive owns.
 - **Look.** Rate-limited toward the target, the same technique as `steer`
   (`greg_locomotion.lua:62`): `cmd:SetViewAngles` plus `lp:SetEyeAngles`.
+- **Tracked look.** `steamid`: find the player every command and aim at `EyePos()`, rate-limited
+  like a yaw/pitch target. If the player is missing or invalid, keep the view and report
+  `reject={gen, reason="look_target_missing"}` once. `point`: aim at the point. Within 16 u
+  horizontally of the target, stop updating yaw so he doesn't spin in place.
+- **Stand-off.** With a tracked look and `near > 0`, while the horizontal distance to the
+  target is at most `near`, drop positive forward motion. Strafing and backing away still apply,
+  so `forward_left` around a player circles them. `held` then omits `forward`.
+- **Use.** `use: true` presses `IN_USE` for exactly one command after a new generation is
+  accepted, like a jump tap. Renewals never press again.
 - **Jump.** `tap` presses `IN_JUMP` for exactly one command on the first grounded CreateMove
   after a *new* generation is accepted. Renewals never re-tap. If he isn't grounded within
   0.5s, report `missed`. `hold` keeps `IN_JUMP` down while active (the game decides re-jumps).
@@ -241,6 +310,13 @@ sent a verb it would silently ignore.
   not `deferred`. The controller also retries. Duplicate stops are harmless; the relay may
   reject the older replayed seq.
 
+- **Control seam (Slice 2).** With the controller built, set the module global
+  `DIRECT_CONTROL = GModControl(controller, people=game_tasks.people)` (declare it `global`
+  in `_run_bridge`). Only do this together with the one-writer routing above. Until every
+  write site goes through the controller, autonomous and route writes overwrite holds, and a
+  legacy `wait` releases a hold until the next renewal. Control needs Core game tasks
+  (`game_tasks`), because its labels and world binding ride the task view.
+
 ## Open decisions
 
 1. Values: renew 0.5s, lease 1.5s, default intent 10s / max 30s, stop retry 0.5s, release
@@ -249,9 +325,18 @@ sent a verb it would silently ignore.
 3. Stop keeps noclip, or exits it.
 4. After a stop, tasks stay blocked until Core calls `allow_tasks()` (Slice 4 decides
    resumption).
-5. Default `speed` 0.5 when a decision gives none (Slice 2 will name gaits for the model).
+5. Default `speed` 0.5 when a decision gives none. Slice 2 names gaits: sneak/walk/jog/run
+   = .25/.5/.75/1.0.
+6. Control on internal (game-attention) turns: off for now.
+7. Slice 2 values: stand-off 80 u (player) / 40 u (place), pitch ±45°, slight turn 30°.
+8. Prompt budget. Core caps a turn prompt at 6000 chars. The control hint plus offer cost
+   about 615 chars, which comes out of recent dialogue first. On the worst-case fixture view
+   (8 destinations) very little dialogue is left. Options: trim `GameTasks.instruction`, or
+   show fewer destinations when control is offered.
+9. A control stop also ends the current game task ("stop" means stop everything).
 
 ## Running the fixtures
 
-`python -m unittest discover -s tests -p test_gmod_controller.py` from the repo root. The tests
+`python -m unittest discover -s tests -p "test_gmod_contro*.py"` from the repo root runs both
+`test_gmod_controller.py` (Slice 1) and `test_gmod_control_contract.py` (Slice 2). The tests
 add the repo root and `deployments/oldpc` to the path, like `test_player_game_tasks.py`.

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import time
 from pathlib import Path
 
@@ -19,7 +20,9 @@ from greg_controller_core import AMBIGUOUS, DEFERRED, FAILED, PUBLISHED, REFUSED
 DRIVE_VERSION = 1
 JUMPS = ('none', 'tap', 'hold')
 MODES = ('walk', 'noclip')
-FIELDS = frozenset(('forward', 'right', 'up', 'speed', 'yaw', 'pitch', 'turn_rate', 'jump', 'crouch', 'mode'))
+FIELDS = frozenset(('forward', 'right', 'up', 'speed', 'yaw', 'pitch', 'turn_rate', 'jump', 'crouch', 'mode',
+                    'look_steamid', 'look_point', 'look_near', 'use'))
+STEAMID = re.compile(r'STEAM_[0-5]:[01]:[0-9]+')
 # Legacy verbs that move, steer or release. Only the controller may send them.
 MOVEMENT = frozenset(('drive', 'move', 'navigate', 'key', 'look', 'gaze', 'wait'))
 IDENTITY = ('steamid', 'bridgeSession', 'controlEpoch', 'map')
@@ -40,11 +43,19 @@ def _count(value):
     return _finite(value) and value >= 0 and value == int(value)
 
 
+def _point(value):
+    if not isinstance(value, (list, tuple)) or len(value) != 3 or not all(_finite(v) and abs(v) <= 65536 for v in value):
+        return None
+    return [float(v) for v in value]
+
+
 def validate(params):
     """Normalize one drive decision; unknown, non-finite or out-of-range fields are refused.
 
     forward/right/up: -1..1 relative to the current view (up only acts in noclip);
-    speed: 0..1 of run speed; yaw/pitch: absolute look target; turn_rate: deg/s.
+    speed: 0..1 of run speed; yaw/pitch: absolute look target; turn_rate: deg/s;
+    look_steamid/look_point: a tracked look target instead (Lua re-aims every command), with
+    look_near: stand-off in units inside which forward motion toward it stops; use: one press.
     """
     if not isinstance(params, dict):
         raise ValueError('drive params must be an object')
@@ -65,11 +76,26 @@ def validate(params):
     yaw, pitch = params.get('yaw'), params.get('pitch')
     if (yaw is not None and not _finite(yaw)) or (pitch is not None and not _finite(pitch)):
         raise ValueError('yaw and pitch must be finite numbers')
+    steamid, point, near, use = (params.get('look_steamid'), params.get('look_point'), params.get('look_near'),
+                                 params.get('use', False))
+    if steamid is not None and not (isinstance(steamid, str) and STEAMID.fullmatch(steamid)):
+        raise ValueError('look_steamid must be a SteamID')
+    if point is not None:
+        point = _point(point)
+        if point is None:
+            raise ValueError('look_point must be three finite world coordinates')
+    if (yaw is not None or pitch is not None) + (steamid is not None) + (point is not None) > 1:
+        raise ValueError('one look target at a time')
+    if near is not None and steamid is None and point is None:
+        raise ValueError('look_near needs a tracked look target')
+    if type(use) is not bool:
+        raise ValueError('use must be true or false')
     return dict(forward=forward, right=right, up=up, speed=_bounded(params, 'speed', 0, 1, .5),
                 yaw=None if yaw is None else float(yaw) % 360,
                 pitch=None if pitch is None else max(-89., min(89., float(pitch))),
                 turn_rate=_bounded(params, 'turn_rate', 30, 720, 180.),
-                jump=jump, crouch=crouch, mode=mode)
+                jump=jump, crouch=crouch, mode=mode, look_steamid=steamid, look_point=point,
+                look_near=None if near is None else _bounded(params, 'look_near', 0, 512, 0.), use=use)
 
 
 def reserve_run(path, *, initialize=False):
@@ -130,10 +156,18 @@ class GModAdapter:
                   'lease': math.floor(lease * 1000) / 1000,  # never past the intent deadline
                   'move': {k: p[k] for k in ('forward', 'right', 'up', 'speed')},
                   'jump': p['jump'], 'crouch': p['crouch']}
-        if p['yaw'] is not None or p['pitch'] is not None:
+        tracked = ({'steamid': p['look_steamid']} if p.get('look_steamid') is not None else
+                   {'point': p['look_point']} if p.get('look_point') is not None else None)
+        if tracked is not None:
+            action['look'] = {**tracked, 'rate': p['turn_rate']}
+            if p.get('look_near') is not None:
+                action['look']['near'] = p['look_near']
+        elif p['yaw'] is not None or p['pitch'] is not None:
             action['look'] = {**{k: p[k] for k in ('yaw', 'pitch') if p[k] is not None}, 'rate': p['turn_rate']}
         if p['mode'] is not None:
             action['mode'] = p['mode']
+        if p.get('use'):
+            action['use'] = True  # Lua presses once per new generation, never on renewal
         return action, 'direct'
 
     def release_action(self, generation, reason, ctl):
@@ -201,3 +235,131 @@ def bridge_publisher(write, cmd_path, next_seq, latest, session, chain=lambda: N
         # next tick (greg_supervised.py:110), so a stop may still reach the game.
         return AMBIGUOUS if mode == 'stop' and action.get('action') == 'wait' else DEFERRED
     return publish
+
+
+# -- Slice 2: Core's typed control decision -> controller -------------------------------
+# The vocabulary is gregory_core.decision_contract's (CONTROL_MOVES/PACES/TURNS); this maps it
+# to GMod inputs. Paces are fractions of run speed: at stock speeds walk is the normal walk.
+PACES = {'sneak': .25, 'walk': .5, 'jog': .75, 'run': 1.}
+MOVES = {'none': (0., 0.), 'forward': (1., 0.), 'back': (-1., 0.), 'left': (0., -1.), 'right': (0., 1.),
+         'forward_left': (1., -1.), 'forward_right': (1., 1.), 'back_left': (-1., -1.), 'back_right': (-1., 1.)}
+TURNS = {'turn_left': 90., 'turn_right': -90., 'turn_around': 180., 'slight_left': 30., 'slight_right': -30.}
+TILTS = {'up': -45., 'down': 45., 'level': 0.}  # Source pitch: negative looks up
+NEAR = {'player': 80., 'destination': 40.}     # stand-off: walk up to a target, not into it
+CONTROL_FIELDS = frozenset(('action', 'command', 'move', 'pace', 'look', 'jump', 'crouch', 'use', 'fly',
+                            'vertical', 'seconds'))
+
+
+def _world(state):
+    return tuple(state.get(k) for k in ('map', 'bridgeSession', 'controlEpoch'))
+
+
+def translate(intent, view, state, player=lambda alias, state: None):
+    """One decoded Core control drive -> (set_intent params, seconds, ignored fields).
+
+    Relative turns use the heading at publication. Look targets must be in this decision's
+    offer (view) and, for players, present now (player(alias, state) -> SteamID or None).
+    ValueError refuses the decision; nothing is changed.
+    """
+    if (not isinstance(intent, dict) or intent.get('action') != 'control' or intent.get('command') != 'drive'
+            or set(intent) - CONTROL_FIELDS):
+        raise ValueError('bounded control drive required')
+    move, speed = MOVES.get(intent.get('move')), PACES.get(intent.get('pace', 'walk'))
+    if move is None or speed is None:
+        raise ValueError('unknown move or pace')
+    seconds = intent.get('seconds')
+    if type(seconds) is not int or not 1 <= seconds <= 30:
+        raise ValueError('seconds must be a whole number from 1 to 30')
+    params = dict(forward=move[0], right=move[1], speed=speed, jump=intent.get('jump', 'none'),
+                  crouch=intent.get('crouch', False), use=intent.get('use', False))
+    look = intent.get('look')
+    if isinstance(look, dict) and set(look) == {'player'}:
+        steamid = player(look['player'], state)
+        if steamid is None:
+            raise ValueError('look target player is not present')
+        params.update(look_steamid=steamid, look_near=NEAR['player'])
+    elif isinstance(look, dict) and set(look) == {'destination'}:
+        row = next((d for d in (view or {}).get('destinations', []) if d.get('id') == look['destination']), None)
+        point = _point((row or {}).get('position'))
+        if point is None:
+            raise ValueError('unoffered look destination')
+        params.update(look_point=point, look_near=NEAR['destination'])
+    elif isinstance(look, str) and look in TURNS:
+        ang = state.get('ang')
+        yaw = ang.get('y') if isinstance(ang, dict) else None
+        if not _finite(yaw):
+            raise ValueError('turn needs the current heading')
+        params['yaw'] = yaw + TURNS[look]
+    elif isinstance(look, str) and look in TILTS:
+        params['pitch'] = TILTS[look]
+    elif look is not None:
+        raise ValueError('unknown look')
+    fly, vertical, ignored = intent.get('fly'), intent.get('vertical'), []
+    if fly is not None:
+        if fly not in ('on', 'off'):
+            raise ValueError('fly must be on or off')
+        params['mode'] = 'noclip' if fly == 'on' else 'walk'
+    if vertical is not None:
+        if vertical not in ('up', 'down'):
+            raise ValueError('vertical must be up or down')
+        drive = state.get('drive')
+        if params.get('mode', drive.get('mode') if isinstance(drive, dict) else None) == 'noclip':
+            params['up'] = 1. if vertical == 'up' else -1.
+        else:
+            ignored.append('vertical')  # only acts in flight; reported, not silently dropped
+    return params, seconds, ignored
+
+
+class GModControl:
+    """Core's direct-control surface over one DirectController, which stays the only writer.
+
+    offer(state) feeds the decision contract; apply() runs once per decision at publication;
+    yield_to_task() hands the body back when Core picks a task or activity. The model's
+    latest decision wins either way. people(state) -> [(view row with 'id', SteamID)], as
+    GameTasks.people, resolves player look targets against the live state.
+    """
+
+    def __init__(self, controller, people=lambda state: ()):
+        self.controller, self.people = controller, people
+
+    def offer(self, state):
+        """What the model may choose now; None when a decision would be refused anyway."""
+        if not isinstance(state, dict) or self.controller.refusal():
+            return None
+        drive = state.get('drive') if isinstance(state.get('drive'), dict) else {}
+        mode = drive.get('mode') if drive.get('mode') in ('walk', 'noclip') else 'other'
+        noclip = drive.get('noclip') if isinstance(drive.get('noclip'), dict) else {}
+        intent = self.controller.status()['intent']
+        offer = dict(mode=mode, active=intent is not None,
+                     seconds_left=0 if intent is None else math.ceil(intent['remaining']),
+                     max_seconds=int(self.controller.policy.max_intent))
+        # Flight is offered unless the game refused it in this world; Lua treats a mode it is
+        # already in as a no-op, so a slightly stale offer is harmless.
+        if mode == 'noclip' or (mode == 'walk' and noclip.get('state') != 'refused'):
+            offer['fly'] = ['on', 'off']
+        return offer
+
+    def apply(self, intent, view, state):
+        """One model decision at publication -> summary dict. ValueError means refused."""
+        if not isinstance(intent, dict) or intent.get('action') != 'control':
+            raise ValueError('control intent required')
+        ignored = []
+        if intent.get('command') == 'stop' and set(intent) == {'action', 'command'}:
+            receipt = self.controller.stop('model_stop')  # stop always wins: no staleness check
+        else:
+            if tuple((view or {}).get('binding', ())) != _world(state):
+                raise ValueError('stale control decision')
+            params, seconds, ignored = translate(intent, view, state, self._player)
+            receipt = self.controller.set_intent(params, seconds)
+        if receipt.refused:
+            raise ValueError(receipt.refused)
+        return dict(generation=receipt.generation, transport=receipt.transport, ignored=ignored)
+
+    def yield_to_task(self):
+        """Core chose a task or activity: end any direct hold and let route helpers write."""
+        if self.controller.status()['intent'] is not None:
+            self.controller.stop('task_selected')
+        self.controller.allow_tasks()
+
+    def _player(self, alias, state):
+        return next((steamid for row, steamid in self.people(state) if row.get('id') == alias), None)
