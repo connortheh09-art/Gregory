@@ -32,8 +32,9 @@ Every controller instance (one per bridge run) has an ordered id `ctl`, and both
   definitely never left (deferred/refused/failed) and nothing else was sent, it is reuse;
   if it may have left (published/accepted/ambiguous), it is our own envelope (review R5).
   Until then, evidence carrying our id is *staged*, not committed: no receipt shows
-  `applied`/`acknowledged` while ownership is unresolved. It is committed in order once an
-  attempt may have left, or discarded when the run retires as reused (review R6). Observed
+  `applied`/`acknowledged` while ownership is unresolved. Only the first sample proving each receipt is kept
+  (bounded, never evicted by later samples); it is committed once an attempt may have left,
+  or discarded when the run retires as reused (review R6, C1). Observed
   input clearance (`released`) is a direct world fact and is recorded as it is seen.
 - **Fence.** The game's generation fence belongs to one run, and traffic from a retired (lower)
   run is ignored, delayed holds *and* delayed stops. A dead run can neither restart motion nor
