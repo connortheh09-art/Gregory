@@ -2,13 +2,36 @@
 import json,time,random
 from collections import deque
 import requests
+from greg_model import post_chat
 from greg_dialogue import model_json,dialogue
 
 class Agenda:
-    def __init__(self,catalog,lm,model):
+    max_autonomous_rests=3
+    def __init__(self,catalog,lm,model,core_decider=None):
         self.catalog,self.lm,self.model=catalog,lm,model
         self.next_at=0.;self.reconsider_at=0.;self.focus={};self.recent=deque(maxlen=12);self.ctx=None
         self.feedback=''
+        self.core_decider=core_decider
+        self.core_failures=0
+
+    def autonomous_rest_available(self,state):
+        """Count accepted autonomous decisions, never controller ticks or owner stays."""
+        ctx=(state.get('map'),state.get('bridgeSession'),state.get('controlEpoch'))
+        if self.ctx!=ctx:return True
+        count=0
+        for row in reversed(self.recent):
+            if row.get('activity')!='rest' or not row.get('autonomous',False):break
+            count+=1
+        return count<self.max_autonomous_rests
+
+    def defer_core(self,now,*,decision_failure=True):
+        # Busy voice is not a bad model response. Repeated invalid output gets
+        # bounded exponential backoff, not an inference loop every 15 seconds.
+        if decision_failure:self.core_failures=min(self.core_failures+1,4)
+        delay=min(120,15*2**max(0,self.core_failures-1)) if decision_failure else 2
+        self.next_at=max(self.next_at,now+delay)
+        self.reconsider_at=max(self.reconsider_at,now+delay)
+        return delay
 
     def decide(self,state,landmarks,events=None):
         ctx=(state.get('map'),state.get('bridgeSession'),state.get('controlEpoch'))
@@ -19,6 +42,7 @@ class Agenda:
             'spawn_choices':self.catalog.choices(state,query=focus.get('query',''),kind=focus.get('kind','')),
             'landmarks':[{'name':x.get('name'),'note':str(x.get('note',''))[:160]}for x in landmarks[:80]],
             'recent_activities':list(self.recent),'feedback':self.feedback,
+            'autonomous_rest_available':self.autonomous_rest_available(state),
             'recent_outcomes':[{k:e[k]for k in ('kind','text','status','reason')if k in e}
                 for e in (events or [])[-12:] if e.get('map')==state.get('map')],
             'spawn_observations':self.catalog.observations(state)}
@@ -38,18 +62,27 @@ class Agenda:
             "Never invent IDs, landmark names, outcomes or permissions. You may add announcement: "
             "one short in-character sentence describing your intention, never reasoning or telemetry. "
             "Server Sandbox permissions and limits apply; a request is not a confirmed spawn.")
-        response=requests.post(self.lm,timeout=8,json={'model':self.model,'temperature':.85,'max_tokens':180,
+        if self.core_decider is not None:
+            value=self.core_decider(system,payload,state)
+            return {'_agenda':True,'choice':value,'context':ctx,'landmarks':payload['landmarks'],
+                    'navigation_available':payload['navigation_available'],'authority':'core','autonomous':True}
+        response=post_chat(self.lm,timeout=8,json={'model':self.model,'temperature':.85,'max_tokens':180,
             'messages':[{'role':'system','content':system},{'role':'user','content':json.dumps(payload)}]})
         response.raise_for_status()
         value=model_json(response.json()['choices'][0]['message'],'agenda')
-        return {'_agenda':True,'choice':value,'context':ctx,'landmarks':payload['landmarks'],'navigation_available':payload['navigation_available']}
+        return {'_agenda':True,'choice':value,'context':ctx,'landmarks':payload['landmarks'],'navigation_available':payload['navigation_available'],'autonomous':True}
 
     def accept(self,result,state,now):
         ctx=(state.get('map'),state.get('bridgeSession'),state.get('controlEpoch'))
         if tuple(result.get('context',()))!=ctx:return {'action':'wait'},''
         if self.ctx!=ctx:self.focus={};self.recent.clear();self.ctx=ctx
         choice=result.get('choice',{});kind=choice.get('activity')
+        autonomous=result.get('autonomous') is True
+        if autonomous and kind=='rest' and not self.autonomous_rest_available(state):
+            self.feedback='Autonomous rest budget exhausted; choose another offered activity.'
+            raise ValueError(self.feedback)
         self.feedback=''
+        self.core_failures=0
         if kind in {'tour','explore'} and result.get('navigation_available') is False:
             self.feedback='No matching navigation data for this map; choose a non-travel activity.'
             self.next_at=now+5
@@ -60,7 +93,7 @@ class Agenda:
             query=str(choice.get('query',''))[:100];item_kind=str(choice.get('kind',''))
             if item_kind not in {'','prop','npc','entity','vehicle','weapon'}:item_kind=''
             self.focus={'query':query,'kind':item_kind};self.next_at=now+1
-            self.recent.append({'activity':'browse','query':query,'kind':item_kind})
+            self.recent.append({'activity':'browse','query':query,'kind':item_kind,'autonomous':autonomous})
             return {'action':'wait'},''
         if kind=='spawn':
             entry=next((e for e in self.catalog.entries(state)[0]if e['id']==choice.get('id')),None)
@@ -87,5 +120,6 @@ class Agenda:
         elif kind=='rest':
             action={'action':'wait'};announcement='';record={'activity':'rest'}
         else:self.next_at=now+3;return {'action':'wait'},''
+        record['autonomous']=autonomous
         self.recent.append(record)
         return action,announcement

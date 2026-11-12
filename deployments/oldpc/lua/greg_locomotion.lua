@@ -1,6 +1,7 @@
 -- Continuous client controller. No file I/O or model calls in CreateMove.
 -- Installed as garrysmod/lua/greg_locomotion.lua; loaded only by client bridge.
 local M = {}
+local VERSION = "curb-v1"
 local S = { status = "idle", event = 0, cursor = 1 }
 local gaze = nil
 local function finite(x) return type(x) == "number" and x == x and math.abs(x) < math.huge end
@@ -17,7 +18,7 @@ function M.cancel(reason)
     transition(reason or "idle")
 end
 function M.status()
-    return { id = S.id, status = S.status, cursor = S.cursor, event = S.event,
+    return { version = VERSION, traversal = S.traversal, id = S.id, status = S.status, cursor = S.cursor, event = S.event,
              interaction = S.interaction, interactionTime = S.interactionTime }
 end
 function M.start(a, now, lp)
@@ -89,19 +90,54 @@ function M.step(cmd,lp,now,dt)
     local len=math.sqrt(delta.x*delta.x+delta.y*delta.y)
     if len<1 then M.cancel("blocked") return end
     local dir=Vector(delta.x/len,delta.y/len,0)
-    local speed=S.walk and 100 or 200
+    local speed=S.walk and 100 or math.max(200,lp:GetRunSpeed())
     speed=math.min(speed,math.max(40,len*2))
     S.speed=math.min(speed,(S.speed or 0)+600*dt)
     local lookAhead=math.min(len,math.max(24,S.speed*.2))
     local ahead=pos+dir*lookAhead
-    local hull=util.TraceHull({start=pos+Vector(0,0,4),endpos=ahead+Vector(0,0,4),
-        mins=Vector(-16,-16,0),maxs=Vector(16,16,60),filter=lp,mask=MASK_PLAYERSOLID})
-    local ground=util.TraceHull({start=ahead+Vector(0,0,20),endpos=ahead-Vector(0,0,48),
-        mins=Vector(-8,-8,0),maxs=Vector(8,8,4),filter=lp,mask=MASK_PLAYERSOLID})
-    if not hull or hull.StartSolid then M.cancel("blocked") return end
-    if not ground or not ground.Hit or ground.StartSolid or (ground.HitNormal and ground.HitNormal.z<.65) then M.cancel("no_ground") return end
+    local mins,maxs=lp:GetHull()
+    local function sweep(a,b)
+        return util.TraceHull({start=a,endpos=b,mins=mins,maxs=maxs,filter=lp,mask=MASK_PLAYERSOLID})
+    end
+    local function clear(t) return t and not t.Hit and not t.StartSolid and not t.AllSolid end
+    local function support(at,rise)
+        local drop=not lp:OnGround() and S.jumpUntil and now<S.jumpUntil and 72 or 48
+        local t=util.TraceHull({start=at+Vector(0,0,rise+2),endpos=at-Vector(0,0,drop),
+            mins=Vector(-8,-8,0),maxs=Vector(8,8,2),filter=lp,mask=MASK_PLAYERSOLID})
+        return t and t.Hit and not t.StartSolid and not t.AllSolid
+            and t.HitNormal and t.HitNormal.z>=.65 and t.HitPos.z>=pos.z-drop
+    end
+    local hull=sweep(pos+Vector(0,0,2),ahead+Vector(0,0,2))
+    if not hull or hull.StartSolid or hull.AllSolid then M.cancel("blocked") return end
+    S.traversal="walk"
+    local jumping=false
+    local obstacle=hull.Entity
+    local isDoor=IsValid(obstacle) and string.find(obstacle:GetClass(),"door",1,true)
+    -- Source already steps over short curbs; do not stop before it can do so.
+    -- Require head clearance, an unobstructed raised hull AND supported landing.
+    local function raised(rise,landing)
+        local up=Vector(0,0,rise+2)
+        return clear(sweep(pos+Vector(0,0,2),pos+up))
+            and clear(sweep(pos+up,landing+up)) and support(landing,rise)
+    end
+    if hull.Hit and not isDoor and lp:OnGround() then
+        local step=math.Clamp(lp:GetStepSize(),0,18)
+        if step>0 and raised(step,ahead) then
+            hull.Hit=false;S.traversal="step"
+        elseif not S.walk and len>64 and now>=(S.nextJump or 0)
+            and (not IsValid(obstacle) or obstacle:IsWorld()) then
+            local landing=pos+dir*math.min(len,64)
+            if raised(40,landing) then
+                hull.Hit=false;jumping=true;S.nextJump=now+1.5;S.traversal="jump"
+                S.jumpUntil=now+.8
+            end
+        end
+    end
+    -- During a validated jump, use a raised ground probe, never disable support checks.
+    local airborne=not lp:OnGround() and S.jumpUntil and now<S.jumpUntil
+    if not support(ahead,(jumping or airborne) and 42 or 20) then M.cancel("no_ground") return end
     if hull.Hit then
-        steer(cmd,lp,(hull.HitPos or ahead)+Vector(0,0,40),dt)
+        steer(cmd,lp,ahead+Vector(0,0,64),dt,true)
         local e=hull.Entity
         local isDoor=IsValid(e) and string.find(e:GetClass(),"door",1,true)
         S.blockedAt=S.blockedAt or now
@@ -133,6 +169,16 @@ function M.step(cmd,lp,now,dt)
             end
         end
         local view=steer(cmd,lp,look,dt,not deliberate)
+        -- Sprint only on a clear supported corridor, away from waypoint turns.
+        if not S.walk and not jumping and not airborne and S.traversal=="walk" and len>160 then
+            local runway=pos+dir*math.min(len,96)
+            if clear(sweep(pos+Vector(0,0,2),runway+Vector(0,0,2))) and support(runway,20) then
+                S.speed=math.min(lp:GetRunSpeed(),len*2,S.speed+600*dt)
+                cmd:AddKey(IN_SPEED);S.traversal="run"
+            end
+        end
+        if jumping then cmd:AddKey(IN_JUMP) end
+        if S.traversal~="run" then S.speed=math.min(S.speed,S.walk and 100 or 200) end
         -- Project world-space travel onto the CURRENT camera basis. Looking left
         -- therefore produces a strafe, not a new world-space destination.
         local basis=Angle(0,view.y,0)

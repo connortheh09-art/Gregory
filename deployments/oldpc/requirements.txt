@@ -1,1 +1,4 @@
 requests
+
+# audioop left the standard library in Python 3.13; needed by local voice PCM conversion.
+audioop-lts; python_version >= "3.13"

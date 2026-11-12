@@ -1,0 +1,7 @@
+{
+  "scope": "Published recovery file set; pattern-based check, not an exhaustive secret detector or Git-history audit.",
+  "private_key_token_pattern_hits": 0,
+  "production_hashes_unchanged": 60,
+  "excluded_private_state": "No live DB, WAL, transcript, receipt, credential or player-memory directory included.",
+  "sanitization": "Omitted owner-specific live diagnostic; voice reference and model config machine-specific URLs changed to loopback. Remaining non-loopback numeric addresses are network-policy ranges or artificial test fixtures."
+}

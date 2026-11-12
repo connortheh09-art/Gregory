@@ -244,6 +244,16 @@ local function buildState(lp)
             return out
         end)(),
 		eye = {
+			hit = eye and eye.Hit == true or false,
+			hitWorld = eye and eye.HitWorld == true or false,
+			hitEntityValid = eye and IsValid(eye.Entity) and not eye.Entity:IsWorld() or false,
+			entIndex = (eye and IsValid(eye.Entity) and not eye.Entity:IsWorld()) and eye.Entity:EntIndex() or nil,
+			model = (eye and IsValid(eye.Entity) and not eye.Entity:IsWorld()) and eye.Entity:GetModel() or nil,
+			entityPos = (function()
+				if not eye or not IsValid(eye.Entity) or eye.Entity:IsWorld() then return nil end
+				local p = eye.Entity:GetPos()
+				return {x=p.x, y=p.y, z=p.z}
+			end)(),
 			hitPos  = { x = math.floor(eyePos.x), y = math.floor(eyePos.y), z = math.floor(eyePos.z) },
 			hitClass = (eye and IsValid(eye.Entity)) and eye.Entity:GetClass() or "world",
 			hitName  = (eye and IsValid(eye.Entity)) and entName(eye.Entity) or "",

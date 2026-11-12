@@ -1,0 +1,22 @@
+{
+  "baseline_commit": "194ed3d2841a72ed1c2915f32d470f09d7f352a9",
+  "files": {
+    "deployments/oldpc/gmod_bridge.py": "3d262fe7b548fb7665af56657364dd34c9096efd3dd9bb1f2da577c0d45a4588",
+    "deployments/oldpc/greg_agenda.py": "90bde9e40b9f45dfb522f19e27d74415769f733cfc9c4f12a1bb3b18e9459188",
+    "deployments/oldpc/greg_catalog.py": "e31c1e9cc24ace3933ed3fd9894e19ffaaab0430c93cd60f78d42d84a804e9ff",
+    "deployments/oldpc/greg_chat_memory.py": "b6857c79e807f826f30b0ddd6771b35f695a50480f7ede427062f84d7f871d7e",
+    "deployments/oldpc/greg_dialogue.py": "b0ea2abf7d6871c351d41e280b17d6ade963976e63c5183732f674f748972406",
+    "deployments/oldpc/greg_goal_lifecycle.py": "bd4bdf3a28c5945d057b680f64917ab2d28f9cac5ea6acc4f998d2e1b7ed7cf7",
+    "deployments/oldpc/greg_model.py": "9a543c1ddb9591645a3f6fd69f94232a741bc9a825ea1b3618916ca0d490a54d",
+    "deployments/oldpc/greg_playercore.py": "f40308885f2ffc4088e03eb08ee2b620381089623b26dd5500455ef20c5fbba0",
+    "deployments/oldpc/greg_social.py": "b98afb56cd71ac04c495c631aa449eb6751bf68c9a5d35eb80000cad8a1fc093",
+    "deployments/oldpc/greg_vision_helper.py": "acc887d2fede2f05a37420dc47fe817526a7b042c7393defa755a0853fbb4f60",
+    "deployments/oldpc/lua/autorun/client/greg_bridge.lua": "874a45405f3121745e5650c4d053245fcfcb583f852996cc0b99609215a735a3",
+    "deployments/oldpc/lua/autorun/server/greg_nav.lua": "9f05b31e2e1e8c7b9de3bd3be48a095e46cf379ff60d1979a9c103d65abb690c",
+    "deployments/oldpc/lua/autorun/server/greg_spawn_observer.lua": "e8e8c3bf975d1c36d8868dd7c906d0b3ab16d59111fa9befa12ca0e98f8269c9",
+    "deployments/oldpc/lua/autorun/server/greg_sv.lua": "c412750a0e1120202acc4faaae6967c834f2e1f14b250cc46d187ef8bb06c063",
+    "deployments/oldpc/lua/greg_catalog.lua": "4f4ef9356f08a17a5a63a3d0cfe165252febdd7a296e7a4a6f9a606439f137fd",
+    "deployments/oldpc/lua/greg_locomotion.lua": "9bb110535289cb80b5abe8b3538821e0b5a4b9dc13cabc6feb14299d5fcc18d2",
+    "deployments/oldpc/lua/greg_rescue.lua": "f48bfbc4db31c8ac525e5ccaab98bc07d28f4c9b0ce31b9d1bf0ab7ab24d695b"
+  }
+}

@@ -1,6 +1,10 @@
 """Only explicit dialogue fields can reach chat; never speak raw model output."""
 import json,re,time,threading
 from pathlib import Path
+try:
+    from greg_events import observed as _observed
+except Exception:
+    def _observed(*args, **kwargs): pass
 _lock=threading.Lock()
 _debug=re.compile(r'<\/?(?:think|analysis|reasoning)>|\b(?:analysis|reasoning|chain.of.thought)\s*:|eye trace|hit world|waiting_obstacle|controlEpoch|locomotion|\bcursor\b|no new chatter',re.I)
 def dialogue(value):
@@ -16,10 +20,13 @@ def model_json(message,source='model'):
     cleaned=re.sub(r'<think>.*?</think>','',raw,flags=re.S|re.I).strip()
     if cleaned.startswith('```') and cleaned.endswith('```'):
         cleaned=re.sub(r'^```(?:json)?\s*','',cleaned)[:-3].strip()
+    parse_status='invalid_json' if raw.strip() else 'empty'
     try:
         value=json.loads(cleaned)
+        parse_status='object' if isinstance(value,dict) else 'non_object'
         if not isinstance(value,dict):value={}
     except (ValueError,TypeError):value={}
+    _observed('decision.parsed', {'json_valid': parse_status=='object', 'parse_status':parse_status, 'parsed': value})
     # Bounded diagnostic record stays on disk, not in chat. Reasoning fields are never read.
     try:
         path=Path(__file__).with_name('greg_model_audit.jsonl')

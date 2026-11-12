@@ -28,12 +28,14 @@ import threading
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from greg_producers import ProducerGroup
 import os
 import random
 import time
 from pathlib import Path
 
 import requests
+from greg_model import post_chat
 
 from greg_playercore import Runtime, NavGraph, EventMemory
 from greg_goal_lifecycle import Goals, Speech
@@ -48,6 +50,7 @@ CATALOG = None
 
 CHAT_MEMORY = None
 PLAYERCORE = None
+_COMMAND_OBSERVER = None
 
 PORT_NOTE = "file transport (no listener)"
 
@@ -946,7 +949,7 @@ def ask(lm: str, model: str, goal: str, state: dict, mode: str = "chat",
         "messages": [{"role": "system", "content": SYSTEM + core_system + " Conversation history is scoped to this speaker. Resolve follow-up comments using that thread; old measurements are historical, never current coordinates. Use only in-character spoken dialogue in reply. No reasoning or telemetry narration."}]
                     + (history or [])[-8:] + [{"role": "user", "content": user}],
     }
-    r = requests.post(lm, json=body, timeout=8)
+    r = post_chat(lm, json=body, timeout=8)
     r.raise_for_status()
     return model_json(r.json()["choices"][0]["message"], "action")
 
@@ -975,7 +978,7 @@ def pick_goal(lm: str, model: str, state: dict, recent: str, done: list,
     body = {"model": model, "temperature": 0.9, "max_tokens": 32,
             "messages": [{"role": "system", "content": GOAL_SYSTEM},
                          {"role": "user", "content": user}]}
-    r = requests.post(lm, json=body, timeout=8)
+    r = post_chat(lm, json=body, timeout=8)
     r.raise_for_status()
     txt = (r.json()["choices"][0]["message"]["content"] or "").strip()
     line = txt.splitlines()[0].strip() if txt else ""
@@ -1036,11 +1039,21 @@ def p0_trace(payload,state):
     except Exception as exc:log('TRACE_ERROR '+str(exc))
 
 def write_cmd(path: Path, seq: int, action: dict, state: dict,
-              session: str, mode: str) -> None:
+              session: str, mode: str, *, observer=None) -> bool:
+    """Report file publication, never game acknowledgement or actuation."""
+    notify = observer if observer is not None else _COMMAND_OBSERVER
+    def report(status, payload=None, reason='', retries=0):
+        if notify is not None:
+            try:
+                notify(payload or {'seq':seq,'session':session,'action':dict(action)},
+                       write_result=status,reason=reason,retries=retries)
+            except Exception: pass
     action = dict(action)
     if action.get("action") == "say":
         text = dialogue(action.get("text"))
-        if not text:return
+        if not text:
+            report("suppressed",reason="invalid_speech")
+            return False
         action["text"] = text
     if isinstance(action.get("speech"),dict):
         text = dialogue(action["speech"].get("text"))
@@ -1052,7 +1065,8 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
     speech_text = action.get("speech", {}).get("text") if isinstance(action.get("speech"), dict) else None
     if action.get("action") == "say" and not SPEECH.allowed(action.get("text", ""), state, time.monotonic()):
         log("SAY_SUPPRESSED duplicate/state-unchanged: %r" % action.get("text"))
-        return
+        report("suppressed",reason="speech_dedup")
+        return False
     tmp = path.with_suffix(".json.tmp")
     payload = {"seq": seq, "action": action, "t": time.time(),
                "expires": time.time() + 2, "session": session, "mode": mode,
@@ -1070,7 +1084,8 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
             if action.get("action") == "say" or speech_text: SPEECH.commit(speech_text or action.get("text", ""), state, time.monotonic())
             LAST_WRITE["t"] = time.time()
             p0_trace(payload,state)
-            return
+            report("written",payload,retries=_)
+            return True
         except OSError as exc:
             last = exc
         try:
@@ -1078,15 +1093,18 @@ def write_cmd(path: Path, seq: int, action: dict, state: dict,
             if action.get("action") == "say" or speech_text: SPEECH.commit(speech_text or action.get("text", ""), state, time.monotonic())
             LAST_WRITE["t"] = time.time()
             p0_trace(payload,state)
+            report("written",payload,retries=_)
             try:
                 tmp.unlink()
             except OSError:
                 pass
-            return
+            return True
         except OSError as exc:
             last = exc
         time.sleep(0.12)
     log("cmd write failed after retries (dropped tick): %r" % (last,))
+    report("failed",payload,reason="write_retries_exhausted",retries=6)
+    return False
 
 
 DIRECTIONS = ("forward", "right", "back", "left")
@@ -1240,24 +1258,177 @@ class Intent:
         return "idle", "Choose your own sandbox activity: spawn, tour, explore, browse, or rest."
 
 
-def inspect(helper: str, state: dict, reason: str) -> dict:
+def inspect(helper: str, state: dict, reason: str, python: str = '', supervised=False) -> dict:
     # VERIFY: wire an existing screenshot+VLM Python helper on the PC.
     # No shell, no new listener, no per-tick capture. The helper returns one JSON object.
     if not helper:
         raise RuntimeError("vision helper not configured")
-    result = subprocess.run([sys.executable, helper], input=json.dumps({"state": state,
-                            "reason": reason}), text=True, capture_output=True,
-                            timeout=12, check=True)
+    result = subprocess.run([python or sys.executable, helper], input=json.dumps({"state": state,
+                            "reason": reason, "supervised": supervised}), text=True, capture_output=True,
+                            timeout=35 if supervised else 12, check=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     value = json.loads(result.stdout)
     stamp = number(value.get("t"), 0)
     caption = value.get("caption")
-    if not isinstance(caption, str) or not caption.strip() or not 0 <= time.time() - stamp <= 10:
+    if not isinstance(caption, str) or not caption.strip() or not 0 <= time.time() - stamp <= (35 if supervised else 10):
         raise ValueError("vision helper must return a fresh caption and epoch t")
     return {"caption": caption[:2000], "t": stamp}
 
 
+def source_manifest():
+    import hashlib
+    root = Path(__file__).resolve().parent
+    # Hash only files actually accessible here; this does NOT attest to installed
+    # addon copies, launcher arguments or a deployed Git commit.
+    paths = sorted(root.glob('*.py')) + sorted((root / 'lua').rglob('*.lua'))
+    files = [{'id':p.relative_to(root).as_posix(), 'version':hashlib.sha256(p.read_bytes()).hexdigest()}
+             for p in paths]
+    return {'files':files[:32], 'truncated':len(files)>32, 'coverage':'collector_tree_snapshot',
+            'build_commit':'unknown', 'base_commit':'194ed3d2841a72ed1c2915f32d470f09d7f352a9'}
+
+
+class ShutdownIncomplete(RuntimeError):
+    def __init__(self, receipt):
+        self.receipt = receipt
+        super().__init__('bridge shutdown incomplete; inspect BRIDGE_SHUTDOWN receipt')
+
+
+def shutdown_bridge(*, worker, social, tracker, recorder, cmd_path, latest,
+                    target, stop_sequence, session, capture, state_tail, deadline_seconds=2.0):
+    """Cancel all intake, bound producer drain, never close a live producer's sink.
+
+    The deadline bounds this function's joins, not Python interpreter exit. A
+    stuck executor still requires an external supervisor and fixture/WAL recovery.
+    """
+    global _COMMAND_OBSERVER
+    if type(deadline_seconds) not in (int,float) or not 0 < deadline_seconds <= 10:
+        raise ValueError('bounded producer deadline required')
+    deadline = time.monotonic()+deadline_seconds
+    errors, completed = [], []
+    stop_status = 'unconfirmed' if capture else 'not_required'
+    health = None
+
+    def attempt(stage, fn):
+        try:
+            value = fn()
+            completed.append(stage)
+            return value
+        except Exception as exc:
+            errors.append({'stage': stage, 'error_type': type(exc).__name__})
+            return None
+
+    def stop():
+        nonlocal stop_status
+        published = False
+        previous_observer = _COMMAND_OBSERVER
+        def observe(payload, **status):
+            nonlocal published
+            published = status.get('write_result') == 'written'
+            if previous_observer is not None:
+                previous_observer(payload, **status)
+        stop_status = 'write_failed'
+        written = write_cmd(cmd_path, stop_sequence, {'action': 'wait'}, latest,
+                            session, 'stop', observer=observe)
+        # Existing observation-preserving wrappers can discard return values.
+        # Neither file publication route claims a game acknowledgement.
+        if written is not True and not published:
+            raise RuntimeError('stop command was not published')
+        stop_status = 'submitted_unverified'
+        if capture:
+            from greg_canary_watch import wait_still
+            stop_status = 'unconfirmed'
+            if not wait_still(state_tail, latest, stop_sequence,
+                              clock=time.monotonic, sleep=time.sleep):
+                raise RuntimeError('game stop unconfirmed')
+            stop_status = 'stationary_corroborated'
+
+    # All cancellation requests precede either join, even if one fails.
+    attempt('worker_cancel', worker.request_stop)
+    attempt('social_cancel', social.request_stop)
+    if latest and target:
+        attempt('stop', stop)
+    elif capture:
+        errors.append({'stage': 'stop', 'error_type': 'NoStopObservation'})
+
+    attempt('start_receipt', lambda: log('BRIDGE_SHUTDOWN_START '+json.dumps(dict(
+        type='bridge_shutdown_start',pid=os.getpid(),session=session,
+        stop_sequence=stop_sequence,stop_status=stop_status,deadline_seconds=deadline_seconds,
+        game_stop_confirmed=False,
+        game_stationary_corroborated=stop_status=='stationary_corroborated'),sort_keys=True)))
+    try:
+        attempt('worker', lambda: worker.join_until(deadline))
+        attempt('social', lambda: social.close(deadline=deadline))
+    except KeyboardInterrupt:
+        # Operator interruption is not a successful drain. Do not touch sinks.
+        try:
+            log('BRIDGE_SHUTDOWN '+json.dumps(dict(type='bridge_shutdown',ok=False,
+                fully_drained=False,interrupted=True,deferred_stages=['tracker','recorder'])))
+        except Exception:
+            pass
+        raise
+    pending = [name for name, producer in (('worker',worker),('social',social.worker))
+               if producer.pending]
+    pending += [e['stage'].replace('_cancel','') for e in errors
+                if e['stage'].endswith('_cancel') and e['stage'].replace('_cancel','') not in pending]
+    if pending and not any(e['stage'] in pending for e in errors):
+        errors.append({'stage':'producers','error_type':'ProducerStillRunning'})
+    if tracker is not None and not pending:
+        def close_tracker():
+            tracker.scope_trace = None
+            tracker.shutdown()
+        attempt('tracker', close_tracker)
+    if not pending:
+        _COMMAND_OBSERVER = None
+    if recorder is not None and not pending:
+        def close_recorder():
+            nonlocal health
+            health = recorder.close(deadline_seconds=2.0)
+            if (health.get('status') != 'closed' or health.get('thread_alive') is not False or
+                    any(health.get(k, 0) for k in ('dropped', 'invalid', 'errors',
+                        'quarantined', 'inflight', 'normal_depth', 'critical_depth'))):
+                raise RuntimeError('recorder did not close cleanly')
+        attempt('recorder', close_recorder)
+
+    receipt = {'type': 'bridge_shutdown', 'ok': not errors,
+        'fully_drained': not errors, 'stop_status': stop_status,
+        'pending_producers':pending,'deferred_stages':['tracker','recorder'] if pending else [],
+        'supervisor_recovery_required':bool(pending),
+        'game_stop_confirmed': False,  # State has no applied-command ACK.
+        'game_stationary_corroborated': stop_status == 'stationary_corroborated',
+        'completed_stages': completed, 'errors': errors,
+        'recorder': None if health is None else {k: health.get(k) for k in (
+            'status', 'thread_alive', 'admitted', 'committed', 'dropped', 'invalid',
+            'errors', 'quarantined', 'inflight', 'last_ingest_sequence')}}
+    try:
+        log('BRIDGE_SHUTDOWN ' + json.dumps(receipt, sort_keys=True))
+    except Exception as exc:
+        errors.append({'stage': 'receipt', 'error_type': type(exc).__name__})
+        receipt.update(ok=False, fully_drained=False)
+    if not receipt['ok']:
+        raise ShutdownIncomplete(receipt)
+    return receipt
+
+
+def interaction_context(target, state, version, mode, supervised=False):
+    state = state or {}
+    base = (target, state.get('bridgeSession'), state.get('controlEpoch'), version)
+    return base + ((state.get('map'),) if supervised else (mode == 'chat',))
+
+
+def supervised_input(text):
+    """Explicit known directives preempt; all other language is conversation."""
+    value = _norm(text)
+    value = re.sub(r'^(?:gregory|greg)[, :]+', '', value).strip()
+    if value in {'look at this', 'inspect this', 'take a look at this',
+                 'what do you see', 'what can you see', 'can you see this', 'look'}:
+        return 'inspect', value
+    plan = literal(value) or legacy_literal(value)
+    return ('directive', value) if plan is not None else ('chat', str(text).strip())
+
+
+
 def main() -> int:
-    global PLAYERCORE, CHAT_MEMORY
+    global PLAYERCORE, CHAT_MEMORY, _COMMAND_OBSERVER
     log("P0_MODULES bridge="+__file__+" playercore="+__import__("greg_playercore").__file__)
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=r"C:\Program Files (x86)\Steam\steamapps\common\GarrysMod\garrysmod\data")
@@ -1268,6 +1439,7 @@ def main() -> int:
     ap.add_argument("--allow", default="", help="comma list of nicks allowed to drive via chat")
     ap.add_argument("--steamid", default="", help="controlled player's SteamID; otherwise pin first fresh player")
     ap.add_argument("--vision-helper", default="", help="optional Python screenshot+VLM helper path")
+    ap.add_argument('--vision-python',default='',help='explicit qualified helper interpreter; default bridge interpreter')
     ap.add_argument("--campaign", default="", help="steering line added to every goal pick")
     ap.add_argument("--guide", default="", help="landmark name substring to steer toward (enables deterministic steering)")
     ap.add_argument("--playercore", action="store_true", help="opt-in routed tasks + continuous client controller")
@@ -1277,7 +1449,92 @@ def main() -> int:
     ap.add_argument("--landmark-map", default="", help="verified map provenance for legacy greg_landmarks.json; blank ignores it")
     ap.add_argument("--no-social", action="store_true", help="disable independent spontaneous/casual chat")
     ap.add_argument("--chat-memory", default="", help="per-player conversation memory; default beside collector")
+    ap.add_argument("--model-min-tokens", type=int, default=0, help="opt-in minimum output budget, including reasoning")
+    ap.add_argument("--model-timeout", type=float, default=8, help="local model request timeout seconds (maximum 120)")
+    ap.add_argument("--model-reasoning", choices=("default", "off"), default="default", help="use model default or request reasoning off (LM Studio)")
+    ap.add_argument("--recorder", action="store_true", help="opt-in passive SQLite experience recording")
+    ap.add_argument("--recorder-db", default="", help="local recorder DB path; requires --recorder")
+    ap.add_argument("--recorder-text", choices=("metadata","visible"), default="metadata")
+    ap.add_argument("--recorder-retention-days", type=int, default=7)
+    ap.add_argument("--recorder-max-mib", type=int, default=1024)
+    ap.add_argument('--first-memory-capture', action='store_true', help='unqualified one-encounter recorder canary, max 5min')
+    ap.add_argument('--first-memory-monitor', default='', help='fresh external canary sampler status; mandatory for canary modes')
+    ap.add_argument('--first-memory-recall', default='', metavar='MANIFEST', help='unqualified sealed speech-only recall; bypasses all legacy policy paths')
+    ap.add_argument('--capture-control', default='', help='finite supervisor generation-bound control')
+    ap.add_argument('--capture-health', default='', help='private bridge/Recorder health output')
+    ap.add_argument('--capture-trial', default='', help='finite supervisor trial UUID')
+    ap.add_argument('--supervised-stop-file',default='',help='fresh run-local owner stop marker, graceful bounded drain')
+    ap.add_argument('--supervised-transcript',action='store_true',help='owner-authorized local bounded text diagnostic for this run only')
+    ap.add_argument('--quiet-test-profile',action='store_true',help='supervised test: disallow autonomous spawn choices; explicit owner voice requests remain available')
+    ap.add_argument('--core-harness',action='store_true',help='supervised outcome-before-speech coordinator; requires Core game tasks and turn-taking')
+    ap.add_argument('--voice-turn-taking',action='store_true',help='opt-in Core listen choice; pair with voice adapter turn-taking')
+    ap.add_argument('--core-screen', action='store_true', help='continuous bounded foreground game capture for Core-selected inspection')
+    ap.add_argument('--core-game-tasks', action='store_true', help='opt-in authenticated voice to Core-selected game tasks')
+    ap.add_argument('--supervised-session', action='store_true', help='opt-in bounded Core/game interaction')
+    ap.add_argument('--core-root', default='', help='existing authoritative Core root; exclusive writer')
+    ap.add_argument('--supervised-owner-steamid', default='', help='only this human SteamID may direct the session')
+    ap.add_argument('--voice-config', default='', help='opt-in narrow Discord voice scope JSON; supervised only')
+    ap.add_argument('--voice-port', type=int, default=0, help='loopback voice port; same local/remote port for SSH forward')
+    ap.add_argument('--voice-receipt', default='', help='private path below Core root for local voice capability')
+    ap.add_argument('--inbox-config', default='', help='trusted sender/bot DM allowlist JSON; opt-in with voice')
+    ap.add_argument('--inbox-receipt', default='', help='separate loopback-only scheduled intake capability')
+    ap.add_argument('--supervised-seconds', type=float, default=1200)
+    ap.add_argument('--speech-temperature', type=float, default=.4, help='Core spoken-reply sampling only; no change to movement policy')
     a = ap.parse_args()
+    if not 0 <= a.voice_port <= 65535 or (a.voice_port and not a.voice_config):
+        ap.error('voice port requires valid port and voice config')
+    if a.voice_config and (not a.supervised_session or not a.voice_receipt):
+        ap.error('voice requires supervised session and private receipt path')
+    if bool(a.inbox_config) != bool(a.inbox_receipt) or (a.inbox_config and not a.voice_config):
+        ap.error('inbox requires voice and paired trusted config/private receipt')
+    if a.supervised_session:
+        if (a.first_memory_capture or a.first_memory_recall or not all((a.core_root, a.supervised_owner_steamid,
+                a.playercore, a.recorder, a.recorder_db, a.no_social, a.vision_helper, a.vision_python))
+                or a.model == 'auto' or not Path(a.core_root).is_dir() or
+                not re.fullmatch(r'STEAM_[0-5]:[01]:[0-9]+', a.supervised_owner_steamid) or
+                not 0 < a.supervised_seconds <= 1200):
+            ap.error('supervised requires existing Core root, explicit human/model/vision paths, playercore, recorder, no-social, <=1200s; not canary')
+    if a.first_memory_capture and a.first_memory_recall: ap.error('capture and recall are separate processes')
+    if a.first_memory_recall and not a.first_memory_monitor:
+        ap.error('canary requires --first-memory-monitor supervision status')
+    if a.first_memory_capture and not all((a.capture_control,a.capture_health,a.capture_trial)):
+        ap.error('capture requires finite supervisor control, health and trial')
+    if not a.first_memory_capture and any((a.capture_control,a.capture_health,a.capture_trial)):
+        ap.error('capture IPC is exclusive to capture mode')
+    if a.first_memory_capture and not (a.playercore and a.recorder and a.recorder_db and a.no_social):
+        ap.error('capture requires --playercore --recorder --recorder-db --no-social')
+    if a.first_memory_capture and (a.recorder_text != 'metadata' or a.recorder_max_mib > 64):
+        ap.error('capture requires metadata and explicit --recorder-max-mib <=64')
+    if a.first_memory_recall:
+        # Dedicated path returns before ChatMemory, EventMemory, catalog, agenda,
+        # action policy, social lane or watchdog construction. Never calls ask().
+        from greg_first_memory import run_recall
+        return run_recall(a, bridge_module=sys.modules[__name__])
+    if a.recorder and (not 1 <= a.recorder_retention_days <= 365 or not 1 <= a.recorder_max_mib <= 102400):
+        ap.error("invalid recorder retention/budget")
+    # This release cooperates across all its modes. The old installed bridge
+    # predates the lock: the supervisor must separately prove it is stopped.
+    from greg_capture_control import command_writer_lock
+    directory=Path(a.data)/'greg';directory.mkdir(parents=True,exist_ok=True)
+    with command_writer_lock(directory/'cmd.writer.lock'):
+        if a.first_memory_capture:
+            from greg_capture_control import CaptureGate
+            gate=CaptureGate(a.capture_control,a.capture_health,a.capture_trial)
+        else:gate=None
+        return _run_bridge(a,ap,gate)
+
+
+def _run_bridge(a, ap, capture_gate=None):
+    global PLAYERCORE, CHAT_MEMORY, _COMMAND_OBSERVER
+    from greg_model import configure
+    try:
+        configure(a.model_min_tokens, a.model_timeout, a.model_reasoning)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if getattr(a,'core_harness',False) and not (a.supervised_session and a.core_game_tasks and a.voice_turn_taking):
+        ap.error('Core harness requires supervised Core game tasks and voice turn-taking')
+    if getattr(a,'quiet_test_profile',False) and not a.supervised_session:
+        raise ValueError('quiet test profile requires supervised session')
     CHAT_MEMORY = ChatMemory(a.chat_memory or str(Path(__file__).resolve().parent / "greg_chat_memory.json"))
     if a.playercore:
         graph = NavGraph.load(a.nav or str(Path(a.data) / "greg" / "navdump.json"), a.waypoints)
@@ -1305,12 +1562,64 @@ def main() -> int:
     model = a.model if a.model != "auto" else resolve_model(root)
     agenda = Agenda(CATALOG, a.lm, model)
     allow = {s.strip() for s in a.allow.split(",") if s.strip()}
+    if getattr(a,'core_screen',False) and not (a.supervised_session and a.core_game_tasks):
+        raise ValueError('Core screen requires supervised Core game tasks')
     target, latest = a.steamid, None
     intent = Intent()
     chat_gate = ChatGate()
     social = SocialLane(a.lm, model, enabled=not a.no_social)
     social_ready = None
     session, seq = uuid.uuid4().hex, 0
+    recorder = tracker = None
+    run_traced = None
+    _COMMAND_OBSERVER = None
+    if a.recorder:
+        try:
+            from greg_recorder import Recorder
+            from greg_experience import ExperienceTracker, SafeTracker
+            from greg_events import run_traced
+            recorder = Recorder(a.recorder_db or str(Path(__file__).resolve().parent / 'greg_recorder' / 'experience.sqlite3'),
+                                session, text=a.recorder_text, retention_days=a.recorder_retention_days,
+                                max_mib=a.recorder_max_mib, build=dict(source_manifest(),model=model,provider='configured_compatible'),
+                                coverage='playercore_navigation' if a.playercore else 'legacy_dispatch_only')
+            if (a.first_memory_capture or a.supervised_session) and not recorder.wait_ready():
+                raise RuntimeError('canary recorder not ready')
+            raw_tracker = (ExperienceTracker(recorder, landmark_capture=True) if (a.first_memory_capture or a.supervised_session)
+                           else ExperienceTracker(recorder))
+            tracker = raw_tracker if (a.first_memory_capture or a.supervised_session) else SafeTracker(raw_tracker)
+            def record_command(payload, **status):
+                speech_trace = social.last_returned_trace if payload.get('action',{}).get('speech') else None
+                trace=tracker.pending_speech_trace if payload.get('action',{}).get('action')=='say' else None
+                tracker.dispatch(payload,trace=trace,speech_trace=speech_trace,**status)
+                if trace is not None: tracker.pending_speech_trace=None
+            _COMMAND_OBSERVER = record_command
+            if PLAYERCORE is not None: PLAYERCORE.observer = tracker.runtime_event
+            social.recorder_tracker = tracker
+            social.recorder_sink = recorder
+        except Exception as exc:
+            if a.first_memory_capture or a.supervised_session:
+                if recorder is not None: recorder.close(deadline_seconds=2.0)
+                raise
+            log('RECORDER_UNAVAILABLE ' + type(exc).__name__)
+            if recorder is not None: recorder.close(deadline_seconds=0)
+            recorder = tracker = None
+            _COMMAND_OBSERVER = None
+    supervised = core = None
+    game_tasks = None
+    game_screen = None
+    game_authority = None
+    voice_activity = None
+    run_voice_log = None
+    voice_session = voice_server = None
+    inbox_server = None
+    supervised_say = None
+    if a.supervised_session:
+        from greg_supervised import TickWriter
+        tick_writer = TickWriter(globals()['write_cmd'])
+    else:
+        tick_writer = None
+    def write_cmd(*args, **kwargs):
+        return tick_writer.publish(*args, **kwargs) if tick_writer else globals()['write_cmd'](*args, **kwargs)
     future, pending_context, pending_at, pending_kind = None, None, 0.0, ""
     pending_refresh = False
     ready, vision = None, None
@@ -1324,12 +1633,125 @@ def main() -> int:
     dead_before = None
     event_say, event_due, event_i = "", 0.0, 0
     # One bounded worker: slow model/vision never blocks state/chat/reflex servicing.
-    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="greg-policy")
+    worker = ProducerGroup(ThreadPoolExecutor(max_workers=1, thread_name_prefix="greg-policy"))
     threading.Thread(target=watchdog, name="greg-watchdog", daemon=True).start()
+    def submit_policy(kind, fn, *args, parent_trace=None, reply_to=None):
+        nonlocal pending_trace
+        if tracker is None:
+            return worker.submit(fn, *args)
+        pending_trace = ((supervised.begin_sensor(reply_to) if supervised else tracker.begin_sensor(parent_trace))
+                         if kind == 'vision' else tracker.begin_decision(lane=kind, template_version=kind + '.v1'))
+        return worker.submit(run_traced, pending_trace, recorder, fn, *args)
+    pending_trace = ready_trace = None
     log(f"watching {greg} (model={model}, target={target or 'first fresh player'})")
+    canary_started = time.monotonic()
+    supervised_draining = False
+    if a.supervised_session:
+        from greg_supervised import SessionWindow, drain_pending, reply_surface
+        session_window = SessionWindow(canary_started, a.supervised_seconds)
+    capture_result = 2
     try:
+        if a.supervised_session:
+            from gregory_core.runtime import Core, LMStudioProvider
+            from greg_supervised import SupervisedLane, ProducerMux
+            inbox_config = json.loads(Path(a.inbox_config).read_text(encoding='utf8')) if a.inbox_config else None
+            def authorize_inbox_voice(claim):
+                if voice_session is None:
+                    raise PermissionError('voice unavailable')
+                return voice_session.consume_inbox(claim)
+            if getattr(a,'core_screen',False):
+                from greg_game_tasks import GameScreen
+                from greg_vision_helper import capture_game
+                game_screen=GameScreen(capture_game,seconds=a.supervised_seconds)
+            core = Core(a.core_root, provider=LMStudioProvider(a.lm, model, temperature=a.speech_temperature),
+                screen_source=game_screen.buffer if game_screen else None,
+                inbox_config=inbox_config,
+                inbox_voice_authorizer=authorize_inbox_voice if inbox_config else None).start()
+            if getattr(a,'voice_config',''):
+                from greg_voice_session import VoiceSession, VoiceServer, VoiceTail
+                config = json.loads(Path(a.voice_config).read_text(encoding='utf8'))
+                if inbox_config and config['owner_id'] not in inbox_config['users']:
+                    raise ValueError('voice owner must match inbox allowlist')
+                if allow and config['game_name'] not in allow:
+                    raise ValueError('voice nickname must match explicit game allowlist')
+                receipt_path = Path(a.voice_receipt).absolute()
+                if (Path(a.core_root).resolve() not in receipt_path.parents or receipt_path.exists() or
+                        receipt_path.parent.resolve() != receipt_path.parent):
+                    raise ValueError('fresh voice receipt below private Core root required')
+                voice_session = VoiceSession(config,a.supervised_owner_steamid,log=log,recorder=recorder)
+                voice_server = VoiceServer(voice_session, port=a.voice_port).start()
+                fd = os.open(str(receipt_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd,'w',encoding='utf8') as out:
+                    json.dump(dict(voice_server.receipt(), **({'bot_id':inbox_config['bot_id']} if inbox_config else {})),out)
+                chat_tail = VoiceTail(chat_tail,voice_session)
+                if getattr(a,'supervised_transcript',False):
+                    from greg_supervised import RunVoiceLog
+                    run_voice_log=RunVoiceLog(receipt_path.parent/'voice-turns.jsonl',config['owner_id'])
+            if inbox_config:
+                from gregory_core.inbox_http import InboxServer
+                path = Path(a.inbox_receipt).absolute()
+                if (Path(a.core_root).resolve() not in path.parents or path.exists() or
+                        path.parent.resolve() != path.parent):
+                    raise ValueError('fresh inbox receipt below private Core root required')
+                inbox_server = InboxServer(core).start()
+                fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd,'w',encoding='utf8') as out:
+                    json.dump(dict(url='http://127.0.0.1:'+str(inbox_server.port),capability=inbox_server.token,
+                        bot_id=inbox_config['bot_id'],users=inbox_config['users']),out)
+            if getattr(a,'core_game_tasks',False):
+                if PLAYERCORE is None or voice_session is None:
+                    raise ValueError('Core game tasks require playercore and authenticated voice')
+                from greg_game_tasks import GameTasks
+                game_tasks=GameTasks(a.supervised_owner_steamid)
+            supervised = SupervisedLane(core, recorder, tracker, log=log, delivery=voice_session,
+                vision_available=bool(game_screen or (a.vision_helper and a.vision_python)),game_tasks=game_tasks,
+                screen_source=game_screen.buffer if game_screen else None,turn_taking=getattr(a,'voice_turn_taking',False),harness=getattr(a,'core_harness',False))
+            if a.supervised_session:
+                from greg_supervised import CoreGameAuthority
+                game_authority=CoreGameAuthority(core,game_screen.buffer if game_screen else None)
+                game_authority.quiet_test_profile=getattr(a,'quiet_test_profile',False)
+                game_authority.dialogue=supervised.recent_dialogue
+                game_authority.foreground_pending=supervised.foreground_pending
+                game_authority.log=log
+                PLAYERCORE.core_authority=True
+                supervised.game_authority=game_authority
+                agenda.core_decider=game_authority.decide_activity
+            if getattr(a,'supervised_stop_file',''):
+                stop_path=Path(a.supervised_stop_file).absolute()
+                if Path(a.core_root).resolve() not in stop_path.parents or stop_path.exists() or stop_path.parent.resolve()!=stop_path.parent:
+                    raise ValueError('fresh run-local stop marker required')
+            worker = ProducerMux(worker, supervised, screen=game_screen)
+            if game_screen is not None:game_screen.start()
+        if a.first_memory_capture:
+            capture_gate.await_baseline(recorder)
+            canary_started = time.monotonic()
         while True:
             now = time.monotonic()
+            if tick_writer is not None:
+                tick_writer.begin_tick(now)
+            if a.supervised_session:
+                if getattr(a,'supervised_stop_file','') and Path(a.supervised_stop_file).exists():
+                    session_window.request_stop(now)
+                phase = session_window.phase(now, drain_pending(worker, supervised, future, supervised_say))
+                if phase != 'active' and not supervised_draining:
+                    supervised_draining = True
+                    if game_screen is not None:game_screen.request_stop()
+                    if voice_session is not None:
+                        voice_session.begin_drain()
+                    log('SUPERVISED_DRAIN_START ' + json.dumps(dict(grace_seconds=35)))
+                    if latest:
+                        seq += 1
+                        write_cmd(cmd_path, seq, {'action':'wait'}, latest, session, 'stop')
+                if phase in ('drained', 'expired'):
+                    log('SUPERVISED_DRAIN_END ' + phase)
+                    break
+            if a.first_memory_capture and now - canary_started >= 300:
+                raise RuntimeError('first-memory capture time limit')
+            if a.first_memory_capture:
+                if not capture_gate.check(recorder):
+                    time.sleep(.1)
+                    continue  # Warm baseline first: no policy/model/movement dispatch.
+            if tracker is not None: tracker.tick()
             for ln in state_tail.read_new():
                 try:
                     st = json.loads(ln)
@@ -1341,8 +1763,23 @@ def main() -> int:
                     if st.get("steamid") == target:
                         if PLAYERCORE is None or PLAYERCORE.observe(st, target, time.time(), now):
                             latest = st
+                            if tracker is not None and PLAYERCORE is None: tracker.accepted_state(st)
+                            if a.first_memory_capture or a.supervised_session:
+                                # Runtime's passive observer deliberately swallows errors.
+                                # The canary must instead fail closed on a bad descriptor.
+                                tracker.accepted_state(st)
                 except (ValueError, TypeError):
+                    if a.first_memory_capture: raise
                     continue
+            if game_screen is not None:
+                game_screen.update(latest,not supervised_draining and actionable(latest,time.time()))
+            if supervised is not None:
+                supervised.update(latest)
+            if a.first_memory_capture and tracker.active_trace is not None:
+                encounter = tracker.observe_landmark()
+                log('FIRST_MEMORY_CAPTURE ' + json.dumps(encounter))
+                capture_result = 0 if encounter['outcome'] == 'prop_observed' else 2
+                break  # finally submits stop and closes the real experience; no auto-promotion.
             me = (latest or {}).get("name", "")
             if PLAYERCORE is None:
                 MEMORY.sample(latest, now)
@@ -1368,6 +1805,41 @@ def main() -> int:
                     user = str(rec.get("user") or "").strip()
                     if isinstance(rec, dict) and chat_gate.accept(rec, target, allow):
                         incoming_text = str(rec.get("msg", ""))
+                        if supervised is not None:
+                            if rec.get('steamid') != a.supervised_owner_steamid:
+                                continue
+                            delivery = getattr(supervised,'delivery',None)
+                            voice_metadata = delivery.claim(rec) if delivery is not None else None
+                            if run_voice_log is not None and voice_metadata is not None:
+                                run_voice_log.utterance(incoming_text,voice_metadata)
+                            kind, incoming_text = supervised_input(incoming_text)
+                            if not session_window.admits(supervised_draining, kind, incoming_text):
+                                log('SUPERVISED_REFUSED session_draining')
+                                continue
+                            if kind == 'chat':
+                                if voice_metadata is not None:
+                                    supervised.hear_voice(incoming_text,voice_metadata)
+                                else:
+                                    supervised.hear(incoming_text)
+                                continue
+                            if kind == 'inspect' and game_screen is not None and voice_metadata is not None:
+                                supervised.hear_voice(incoming_text,voice_metadata)
+                                continue
+                            if kind == 'inspect':
+                                if future is None and actionable(latest, time.time()):
+                                    future = submit_policy('vision', inspect, a.vision_helper, dict(latest),
+                                                           'owner requested inspection', a.vision_python, True,
+                                                           reply_to='voice' if voice_metadata is not None else 'game')
+                                    pending_at, pending_kind = now, 'vision'
+                                    pending_context = interaction_context(target, latest, intent.version, 'chat', True)
+                                else:
+                                    log('SUPERVISED_REFUSED sensor_busy_or_stale')
+                                continue
+                            supervised.invalidate()
+                            voice_activity=None
+                            if game_tasks is not None and (literal(incoming_text) or {}).get('kind')!='continue':
+                                game_tasks.invalidate()
+
                         map_name = str((latest or {}).get("map", ""))
                         bridge_session = str((latest or {}).get("bridgeSession", ""))
                         CHAT_MEMORY.add(map_name, rec["steamid"], "user", incoming_text, time.time(), bridge_session)
@@ -1387,6 +1859,7 @@ def main() -> int:
                             log("SOCIAL non-preempting -> " + repr(incoming_text))
                             continue
                         intent.direct(user, incoming_text, now, rec["steamid"])
+                        if tracker is not None: tracker.directive(intent.version)
                         if PLAYERCORE is not None:
                             PLAYERCORE.directive(user, str(rec.get("msg", "")), (latest or {}).get("map", ""), now,
                                                  (literal(str(rec.get("msg", ""))) or {}).get("kind"))
@@ -1420,19 +1893,37 @@ def main() -> int:
                     record_lesson({"text": "Recent goal ended: " + str(list(intent.goals.recent)[-1:])}, latest)
             mode, goal = intent.choose(now)
             valid = actionable(latest, time.time())
-            context = (target, (latest or {}).get("bridgeSession"),
-                       (latest or {}).get("controlEpoch"), intent.version, mode == "chat")
+            context = interaction_context(target, latest, intent.version, mode, a.supervised_session)
             if context != previous_context or valid != was_actionable:
+                voice_activity=None
+                if game_tasks is not None:game_tasks.invalidate()
+                if supervised is not None:
+                    supervised.invalidate()
+                    supervised_say = None
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace, accepted=False, reason='context_changed')
+                ready_trace = None
                 ready, vision = None, None
                 pending_say = None
                 command_due = 0
                 # Changing into chat preempts a currently held free-roam action.
                 if valid and mode == "chat":
                     seq += 1
-                    write_cmd(cmd_path, seq, {"action": "wait"}, latest, session, mode)
+                    write_cmd(cmd_path, seq, {"action": "wait"}, latest, session, "stop" if a.supervised_session else mode)
                     command_due = now + 0.35  # let Lua observe cancellation before look/move
                 previous_context = context
             was_actionable = valid
+            if game_tasks is not None:game_tasks.update(PLAYERCORE,latest,now)
+            if game_authority is not None and latest:
+                game_authority.observe(latest,CATALOG.observations(latest),PLAYERCORE.memory.recent_events(latest.get('map',''),4))
+                game_authority.offer(latest,CATALOG,PLAYERCORE.memory.landmarks(latest.get('map','')),
+                    ((game_tasks.snapshot() or {}).get('navigation_available',False) if game_tasks else latest.get('map')==PLAYERCORE.graph.map),now)
+            if game_screen is not None and supervised is not None and not supervised_draining:
+                supervised.consider_game_feedback()
+            if supervised is not None:
+                supervised.poll()
+                if supervised_say is None:
+                    supervised_say = supervised.take()
 
             # Independent inference never touches Intent, Runtime or the mailbox.
             if latest:
@@ -1453,27 +1944,65 @@ def main() -> int:
             if future is not None and future.done():
                 try:
                     result = future.result()
+                    log(f"INFERENCE_RESULT kind={pending_kind} latency={now-pending_at:.2f} valid={valid} context_match={pending_context==context}")
                     if PLAYERCORE is not None and pending_kind == "model":
                         log("MODEL_RESULT " + json.dumps(result)[:800] + " cursor=" + str(getattr(PLAYERCORE,"explore_cursor",None)) + " valid=" + str(valid) + " context_match=" + str(pending_context==context) + " latency=" + str(now-pending_at))
                     if valid and pending_context == context:
+                        if game_tasks is not None and game_tasks.engaged and pending_kind != "vision":
+                            result = {"action":"wait"}
                         if pending_kind == "vision":
-                            vision = result
+                            vision = None if supervised is not None else result
+                            if tracker is not None:
+                                if supervised is not None:
+                                    supervised.sensor(pending_trace, result)
+                                else:
+                                    tracker.sensor_result(pending_trace, accepted=True, reason='sensor_ready', result=result)
                         elif pending_kind == "goal":
                             g = result if isinstance(result, str) else ""
-                            if g.strip() and intent.goals.start(g, "self", latest, now):
+                            goal_started = bool(g.strip() and intent.goals.start(g, "self", latest, now))
+                            if goal_started:
                                 intent.self_goal = g
                                 log("new self_goal=%r" % g)
                             else:
                                 log("goal pick empty; keeping %r" % intent.self_goal)
                             intent.self_at = now
-                        elif now - pending_at <= 10:
+                            if tracker is not None:
+                                tracker.goal_selection(pending_trace, accepted=goal_started, goal=g,
+                                                       native_goal=intent.goals.active if goal_started else None)
+                        # An agenda choice is semantic, not a stale movement command.
+                        # Agenda.accept revalidates map/session/epoch and live catalog
+                        # IDs; local navigation plans from the CURRENT state. Keep
+                        # the original 10s limit for state-dependent action replies.
+                        elif now - pending_at <= (max(10, a.model_timeout) if pending_kind == "agenda" else 10):
                             ready = result  # split reply/action once, below
+                            ready_trace = pending_trace
+                    if tracker is not None and pending_trace is not None:
+                        age_limit = max(10, a.model_timeout) if pending_kind == 'agenda' else 10
+                        if not valid or pending_context != context or (pending_kind not in {'vision','goal'} and now-pending_at > age_limit):
+                            if pending_kind == 'vision': tracker.sensor_result(pending_trace, accepted=False, reason='stale_or_context')
+                            else: tracker.decision_result(pending_trace, accepted=False, reason='stale_or_context')
                 except Exception as exc:
                     if PLAYERCORE is not None: PLAYERCORE.needs_brain = True
-                    log(f"{pending_kind} unavailable: {exc}; API fallback remains live")
+                    if a.supervised_session and pending_kind=='agenda':
+                        # Invalid idle output must not monopolize the shared Core gate.
+                        from greg_supervised import CoreTurnDeferred
+                        delay=agenda.defer_core(now,decision_failure=not isinstance(exc,CoreTurnDeferred))
+                        log(f"{pending_kind} unavailable: {exc}; Core retry deferred {delay}s, no legacy fallback")
+                    else:
+                        log(f"{pending_kind} unavailable: {exc}; API fallback remains live")
+                    if tracker is not None and pending_trace is not None:
+                        if pending_kind == 'vision': tracker.sensor_result(pending_trace, accepted=False, reason='inference_error')
+                        else: tracker.decision_result(pending_trace, accepted=False, reason='inference_error')
                 future = None
+                pending_trace = None
                 request_due = now + 1
 
+            if supervised_draining:
+                if supervised_say is not None:
+                    supervised.published(supervised_say, False, qualification='session ended; not spoken')
+                    supervised_say = None
+                time.sleep(.1)
+                continue
             if not valid:
                 time.sleep(0.1)
                 continue
@@ -1497,21 +2026,33 @@ def main() -> int:
             if isinstance(tool, dict) and tool.get("action") == "inspect":
                 ready = tool
             if ready and ready.get("action") == "inspect":
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_inspect',activate=False)
+                sensor_started = False
                 if future is None and now >= vision_due and a.vision_helper:
                     reason = str(ready.get("reason", "describe appearance"))[:240]
-                    future = worker.submit(inspect, a.vision_helper, dict(latest), reason)
+                    future = submit_policy("vision", inspect, a.vision_helper, dict(latest), reason, a.vision_python, a.supervised_session, parent_trace=ready_trace)
                     pending_context, pending_at, pending_kind = context, now, "vision"
                     vision_due = now + 10
+                    sensor_started = True
+                if tracker is not None and ready_trace is not None and not sensor_started:
+                    tracker.close(ready_trace.correlation_id,'sensor_not_started')
+                ready_trace = None
                 ready = None  # never send a collector tool to Lua
             cand = ready if isinstance(ready, dict) else None
             if cand is not None and isinstance(cand.get("action"), dict):
                 cand = cand["action"]
             if isinstance(cand, dict) and cand.get("action") == "note":
                 # Collector-only tool: the model writes a durable lesson about this spot.
-                record_lesson(cand, latest)
+                if supervised is None:
+                    record_lesson(cand, latest)
                 log("lesson stored: " + str(cand.get("text", ""))[:140])
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace,accepted=True,reason='collector_note',activate=False)
+                    tracker.close(ready_trace.correlation_id,'note_recorded')
+                ready_trace = None
                 ready = None
-            if future is None and now >= request_due and (mode == "chat" or PLAYERCORE is None or now >= agenda.next_at) and not (mode == "chat" and (intent.plan or intent.answered)) and (PLAYERCORE is None or mode == "chat" or (not PLAYERCORE.goals.active and (PLAYERCORE.needs_brain or now >= agenda.reconsider_at))):
+            if future is None and now >= request_due and (mode == "chat" or PLAYERCORE is None or now >= agenda.next_at) and not (mode == "chat" and (intent.plan or intent.answered)) and (PLAYERCORE is None or mode == "chat" or (not (game_tasks is not None and game_tasks.engaged) and not PLAYERCORE.goals.active and (PLAYERCORE.needs_brain or now >= agenda.reconsider_at))):
                 # Goal refresh gets its OWN call. Bundling it into the action prompt
                 # never worked: the model silently omitted self_goal, so one string
                 # stuck for 3568 ticks. Refresh when there is no goal, the goal has
@@ -1520,17 +2061,17 @@ def main() -> int:
                     not intent.self_goal
                 )
                 if need_goal and PLAYERCORE is None:
-                    future = worker.submit(pick_goal, a.lm, model, dict(latest),
+                    future = submit_policy("goal", pick_goal, a.lm, model, dict(latest),
                                            MEMORY.render(), list(intent.goals.recent), a.campaign)
                     pending_context, pending_at, pending_kind = context, now, "goal"
                 elif PLAYERCORE is not None and mode != "chat":
                     PLAYERCORE.needs_brain = False
-                    future = worker.submit(agenda.decide, dict(latest, navigation_available=latest.get("map")==PLAYERCORE.graph.map),
+                    future = submit_policy("agenda", agenda.decide, dict(latest, navigation_available=latest.get("map")==PLAYERCORE.graph.map),
                                            list(PLAYERCORE.memory.landmarks(latest.get("map", ""))),
-                                           list(PLAYERCORE.memory.tail)[-12:])
+                                           PLAYERCORE.memory.recent_events(latest.get("map", ""), 12))
                     pending_context, pending_at, pending_kind = context, now, "agenda"
                 else:
-                    future = worker.submit(ask, a.lm, model, goal, dict(latest), mode, vision,
+                    future = submit_policy("action", ask, a.lm, model, goal, dict(latest), mode, vision,
                                            False,
                                            (CHAT_MEMORY.history(latest.get("map", ""), intent.speaker_id, latest.get("bridgeSession", "")) if CHAT_MEMORY is not None else list(intent.history)[:-1]) if mode == "chat" else [],
                                            MEMORY.render() + lessons_text(latest) + (landmark_text(latest) if PLAYERCORE is None else "")
@@ -1538,7 +2079,83 @@ def main() -> int:
                     pending_context, pending_at, pending_kind = context, now, "model"
             # Existing Lua accepts ONE verb per envelope. Serialize slots, don't invent
             # a batch verb: execute action first, then optional say >=0.35s later.
-            if pending_say and now >= pending_say[0]:
+            if supervised_say is not None and now >= command_due:
+                row = supervised_say
+                # Recheck at publication, not only when inference finished.
+                if (row['request']['generation'] == supervised.generation and actionable(latest, time.time())
+                        and (not getattr(supervised,'harness',False) or supervised.admit_publication(row))):
+                    trace = row['request'].get('trace')
+                    tracker.pending_speech_trace = trace
+                    if game_tasks is not None and row.get('game_intent') is not None:
+                        stamp=row['request'].get('delivery_stamp')
+                        if ((row['request'].get('voice_metadata') or row['request'].get('game_attention')) and voice_session is not None
+                                and stamp==voice_session.stamp()):
+                            try:
+                                if row['game_intent'].get('action')=='game_activity':
+                                    if (row.get('game_task_view') or {}).get('revision')!=(game_tasks.snapshot() or {}).get('revision'):
+                                        raise ValueError('stale task decision')
+                                    if row['request'].get('game_attention') and game_tasks.engaged:
+                                        raise ValueError('finish or revise current task before unrelated activity')
+                                    proposal=game_authority.validate_activity(row['game_intent'],row.get('activity_options') or {},latest)
+                                    chosen,announcement=agenda.accept(proposal,latest,now)
+                                    if proposal['choice']['activity']=='spawn' and chosen.get('action')!='spawn_item':
+                                        raise ValueError('catalog item no longer available')
+                                    if proposal['choice']['activity'] in {'tour','explore','rest'}:
+                                        game_tasks.invalidate();PLAYERCORE.end_goal('abandoned','core_activity_change')
+                                    voice_activity=(tuple(latest.get(k) for k in ('map','bridgeSession','controlEpoch')),now,chosen,announcement)
+                                    game_authority.note(latest,'choice',choice=proposal['choice'],intention=row['say'][:160],qualification='chosen_not_executed')
+                                    verdict='accepted'
+                                else:
+                                    if row['request'].get('game_attention') and game_tasks.engaged and row['game_intent'].get('kind') in {'visit','hide','hold'}:
+                                        if row['game_intent'].get('task_id')!=(game_tasks.snapshot().get('current_task') or {}).get('id'):
+                                            raise ValueError('internal retry must retain task id')
+                                    verdict=game_tasks.apply(row['game_intent'],row.get('game_task_view'),latest,PLAYERCORE,now,
+                                        screen_observations=row.get('screen_observations',[]),
+                                        screen_session=game_screen.buffer.session if game_screen else None)
+                                ready=None
+                                row['task_outcome']=dict(verdict=verdict,kind=row['game_intent'].get('kind'))
+                                if verdict in {'accepted','continued'}:
+                                    tracker.decision_result(trace,accepted=True,reason='core_conversation_task_'+verdict,
+                                        parsed_summary=dict(kind=row['game_intent'].get('kind')),activate=False)
+                                log('CORE_GAME_TASK '+json.dumps(dict(verdict=verdict,request_id=(row['request'].get('voice_metadata') or {}).get('request_id'))))
+                            except ValueError as exc:
+                                row['task_outcome']=dict(verdict='refused',reason=str(exc)[:160],
+                                    proposal=row['game_intent'],offered_ids=[x['id'] for x in (row.get('game_task_view') or {}).get('destinations',[])])
+                                game_tasks.record_refusal(row['game_intent'],row.get('game_task_view'),latest,str(exc))
+                                if game_authority is not None:game_authority.note(latest,'task_refused',reason=str(exc)[:120],target=str(row['game_intent'].get('target',''))[:80])
+                                row=dict(row,say="I couldn't apply that change to my game task. I'll keep my current task.")
+                                log('CORE_GAME_TASK_REFUSED '+str(exc))
+                                log('CORE_GAME_TASK_REFUSAL_DETAILS '+json.dumps(dict(
+                                    outcome=row['task_outcome'],internal=bool(row['request'].get('game_attention')),
+                                    phase=((game_tasks.snapshot() or {}).get('current_task') or {}).get('phase'),
+                                    frame_statuses=[x.get('status') for x in row.get('screen_observations',[])][:1])))
+                    if getattr(supervised,'harness',False) and game_tasks is not None:
+                        game_tasks.update(PLAYERCORE,latest,now)
+                    if not (getattr(supervised,'harness',False) and supervised.defer_speech(row)):
+                        surface = reply_surface(row, voice_session is not None)
+                        if surface == 'voice':
+                            published = voice_session.offer(row)
+                        elif surface == 'game':
+                            seq += 1
+                            published = write_cmd(cmd_path, seq, {'action':'say', 'text':row['say']}, latest, session, 'chat')
+                        else:
+                            published = False
+                        tracker.pending_speech_trace = None
+                        if run_voice_log is not None:run_voice_log.reply(row,published)
+                        supervised.published(row, published is True, listened=bool(surface=='internal' and row.get('voice_wait')), qualification=(
+                            'voice transport queued, not audible delivery' if surface == 'voice'
+                            else 'mailbox publication, not audible delivery'))
+                    tracker.pending_speech_trace = None
+                else:
+                    log('SUPERVISED_PUBLICATION_REFUSED '+json.dumps(dict(
+                        request_id=(row['request'].get('voice_metadata') or {}).get('request_id'),
+                        reason=('generation_changed' if row['request']['generation'] != supervised.generation
+                            else 'controller_not_actionable' if not actionable(latest,time.time())
+                            else 'harness_admission_refused'))))
+                    supervised.published(row, False)
+                supervised_say = None
+                command_due = now + .35
+            if pending_say and now >= pending_say[0] and (not a.supervised_session or now >= command_due):
                 _, version, text = pending_say
                 if mode == "chat" and version == intent.version:
                     seq += 1
@@ -1547,9 +2164,12 @@ def main() -> int:
                         CHAT_MEMORY.add(latest.get("map", ""), intent.speaker_id, "assistant", text, time.time(), latest.get("bridgeSession", ""))
                 pending_say = None
                 command_due = max(command_due, now + 0.35)
-            if now >= command_due and pending_say is None:
+            if now >= command_due and (pending_say is None or a.supervised_session):
                 reply = ""
                 activity_announcement = ""
+                if tracker is not None:
+                    tracker.scope_trace = ready_trace
+                recorder_proposal = ready
                 if mode == "chat" and intent.plan:
                     action, reply = direct_action(intent, latest)
                 elif ready is not None:
@@ -1567,9 +2187,20 @@ def main() -> int:
                     if mode == "chat": intent.answered = True
                 else:
                     action = None
+                chosen_voice_activity=False
+                if voice_activity is not None:
+                    bound,selected_at,selected_action,selected_announcement=voice_activity
+                    voice_activity=None
+                    if bound==tuple(latest.get(k) for k in ('map','bridgeSession','controlEpoch')) and now-selected_at<=3:
+                        action=selected_action;activity_announcement=selected_announcement;chosen_voice_activity=True
                 if PLAYERCORE is not None:
                     if mode != "chat":
-                        action = PLAYERCORE.autonomous(action, latest, now, intent)
+                        if chosen_voice_activity:
+                            if action.get('action')=='goal':action=PLAYERCORE.autonomous(action,latest,now,intent)
+                        elif game_tasks is not None and game_tasks.engaged:
+                            action=game_tasks.tick(PLAYERCORE,latest,now)
+                        else:
+                            action = PLAYERCORE.autonomous(action, latest, now, intent)
                     elif action and action.get("action") == "goal":
                         kind = action.get("kind")
                         if kind in {"follow", "approach", "landmark"}:
@@ -1588,6 +2219,7 @@ def main() -> int:
                         intent.last_say = text
                         intent.history.append({"role": "assistant", "content": text})
                         pending_say = (now + 0.35, intent.version, text)
+                        if tracker is not None: tracker.pending_speech_trace=ready_trace
                     else:
                         log("say rejected: lexical echo or repeated reply")
                 blocked_fold = False
@@ -1633,19 +2265,67 @@ def main() -> int:
                     action = dict(action, speech={"id": session+":"+str(seq+1),
                                                   "text": social_ready[2]["text"]})
                     social_ready = None
+                if tracker is not None and ready_trace is not None:
+                    tracker.decision_result(ready_trace, accepted=True, reason='existing_policy_evaluated',
+                                            parsed_summary=recorder_proposal or {})
+                if a.first_memory_capture and tracker.active_trace is not None:
+                    # Spawn/speech/wait dispatch can close this real decision synchronously.
+                    # Pin its fresh observation first; never append to a closed experience.
+                    tracker.observe_landmark()
                 seq += 1
-                write_cmd(cmd_path, seq, action, latest, session, mode)
-                MEMORY.open(action, latest, now, action.get("duration", interval), seq)
+                published = write_cmd(cmd_path, seq, action, latest, session, mode)
+                if game_authority is not None:game_authority.action(latest,action,published,seq)
+                if published is True:
+                    MEMORY.open(action, latest, now, action.get("duration", interval), seq)
                 log(f"#{seq} {mode} goal={goal!r} -> {json.dumps(action)}")
+                if tracker is not None: tracker.scope_trace = None
+                ready_trace = None
                 command_due = now + (0.35 if social_sent else (action.get("duration", interval) if action["action"] == "move" else interval))
                 if a.turns and seq >= a.turns:
                     return 0
             time.sleep(0.1)
     finally:
-        if latest and target:
-            write_cmd(cmd_path, seq + 1, {"action": "wait"}, latest, session, "stop")
-        worker.shutdown(wait=False, cancel_futures=True)
-        social.close()
+        if game_screen is not None:game_screen.request_stop()
+        if inbox_server is not None:
+            inbox_server.close()
+        if voice_server is not None:
+            voice_server.close_intake()
+        primary = sys.exc_info()[1]
+        try:
+            receipt=shutdown_bridge(worker=worker, social=social, tracker=tracker, recorder=recorder,
+                cmd_path=cmd_path, latest=latest, target=target, stop_sequence=seq + 1,
+                session=session, capture=a.first_memory_capture, state_tail=state_tail)
+            if game_screen is not None:
+                log('CORE_SCREEN_STOP '+json.dumps(dict(stopped=not game_screen.pending,capture_failures=game_screen.loop.failures)))
+            if core is not None and receipt['fully_drained']:
+                core.call('stop')
+                core.thread.join(5)
+                if core.thread.is_alive():
+                    raise RuntimeError('Core shutdown did not finish')
+        except ShutdownIncomplete as exc:
+            if a.supervised_session and core is not None:
+                from greg_supervised import recover_failed_core
+                recover_failed_core(core, exc.receipt,
+                    Path(a.core_root) / ('bridge-recovery-' + session + '.json'), log=log)
+            if capture_gate is not None:
+                capture_gate.finish(recorder,exc.receipt,primary=primary or exc)
+            if primary is None:
+                raise
+            # Preserve the original loop/provider/monitor cause, not cleanup's.
+            if hasattr(primary, 'add_note'):
+                primary.add_note(str(exc))
+        except BaseException as exc:
+            if capture_gate is not None:
+                capture_gate.finish(recorder,dict(ok=False,fully_drained=False,
+                    error_category=type(exc).__name__),primary=primary or exc)
+            raise
+        else:
+            if capture_gate is not None:
+                capture_gate.finish(recorder,receipt,primary=primary)
+        finally:
+            if voice_server is not None:
+                voice_server.close()
+    return capture_result if a.first_memory_capture else 0
 
 
 if __name__ == "__main__":

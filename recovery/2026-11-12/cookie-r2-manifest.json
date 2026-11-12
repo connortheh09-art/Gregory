@@ -1,0 +1,27 @@
+[
+  {
+    "path": "deployments/oldpc/greg_supervised.py",
+    "before_sha256": "df7a93b9994af7afd101776b3d969f4e4482f0a9cdf58cab5448b2c5c5ad74a2",
+    "after_sha256": "b5230e86a6bc6032e3318841e63a357f042ccb17483eedca0c20b3c9da3f1c61"
+  },
+  {
+    "path": "deployments/oldpc/gmod_bridge.py",
+    "before_sha256": "a26638c148b1e32134d377051e070e287c439da36831f74fdb27b3c4af25d42c",
+    "after_sha256": "21e3882c6e2f2185a1ada4c15a1329ad0a606568b3b12fb291dcb9859ae3874b"
+  },
+  {
+    "path": "deployments/oldpc/greg_voice_client.py",
+    "before_sha256": "a42085ca21859474a5e0a31c20af6cd7d57737a9bba6fda999bfa69056cc505f",
+    "after_sha256": "999a3824b32bdabba12137e3f2f40e905194c023b298e6033e89676d14362f40"
+  },
+  {
+    "path": "deployments/oldpc/greg_voice_session.py",
+    "before_sha256": "cebddd3d4e5ae4b06cd9f409874834e949961344e287612137598b673d35b810",
+    "after_sha256": "db4e6c10c1d4c9ba55f7381cd22624edc9d678a7157091c8772098f48e59729c"
+  },
+  {
+    "path": "tests/test_cookie_silence.py",
+    "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "after_sha256": "24fe0ac101055db73f6199475986432cd5118bdadacc19200a989ac01eaa1c4f"
+  }
+]

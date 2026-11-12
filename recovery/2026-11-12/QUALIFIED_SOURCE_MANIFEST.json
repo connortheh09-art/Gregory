@@ -1,0 +1,796 @@
+{
+  "baseline": "cookie-silence-r2",
+  "origin": "/data/.openclaw/workspace-coding/stage/core-cookie-silence-20261111/r2/source",
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 414,
+      "sha256": "ba9828efcdfd73564f6eec7d5bf92fd516e4e324cc7f4a3c0f4f4eab02afc65f"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2111,
+      "sha256": "9f34acfcffc8c882c94573053bce8ed9f7e5a14a4a274357f4c9281d01d6fe9f"
+    },
+    {
+      "path": "config.example/.env.example",
+      "bytes": 497,
+      "sha256": "33db4d0a6e283d75a83c4c472629f904784e50e73be095e460c5000d6f322ea6"
+    },
+    {
+      "path": "config.example/README.md",
+      "bytes": 428,
+      "sha256": "70117dda95b38921432edf3fd98ea34f9080bdde09342026e97dc211169dafd9"
+    },
+    {
+      "path": "deployments/oldpc/README.md",
+      "bytes": 3651,
+      "sha256": "7f29177f981173f6bc2cb62c920c1b90d070cd14354f1555c0dca8b350a774f8"
+    },
+    {
+      "path": "deployments/oldpc/SOURCE-MANIFEST.json",
+      "bytes": 7938,
+      "sha256": "ba1cbc219e7631c897e65b797e99dc532692ed851e55dbd67174a772a793ef82"
+    },
+    {
+      "path": "deployments/oldpc/gmod_bridge.py",
+      "bytes": 131004,
+      "sha256": "21e3882c6e2f2185a1ada4c15a1329ad0a606568b3b12fb291dcb9859ae3874b"
+    },
+    {
+      "path": "deployments/oldpc/greg_agenda.py",
+      "bytes": 8285,
+      "sha256": "45f6b5008f3cbb99c6180d6e2348942c994e639d7f5bb0444167a18e5079e8ea"
+    },
+    {
+      "path": "deployments/oldpc/greg_canary_watch.py",
+      "bytes": 3963,
+      "sha256": "fce42393ab8bac3be506aa297ef6cf46dfc4e54813e4e1d50e0d2fb43097fd4a"
+    },
+    {
+      "path": "deployments/oldpc/greg_capture_control.py",
+      "bytes": 9552,
+      "sha256": "b05b3bd4a850e29a0b60b86842efc454d4994cb812277c85aab180c8c65a9877"
+    },
+    {
+      "path": "deployments/oldpc/greg_capture_process.py",
+      "bytes": 18382,
+      "sha256": "ad8cb16530b2fbe5956263d55311e62bb8ed6f29f1491a34821c4a72483d7775"
+    },
+    {
+      "path": "deployments/oldpc/greg_catalog.py",
+      "bytes": 3770,
+      "sha256": "e31c1e9cc24ace3933ed3fd9894e19ffaaab0430c93cd60f78d42d84a804e9ff"
+    },
+    {
+      "path": "deployments/oldpc/greg_chat_memory.py",
+      "bytes": 7300,
+      "sha256": "b6857c79e807f826f30b0ddd6771b35f695a50480f7ede427062f84d7f871d7e"
+    },
+    {
+      "path": "deployments/oldpc/greg_dialogue.py",
+      "bytes": 2205,
+      "sha256": "67faed372255fcc0d2f5727f9145c2b5b0b4c1c5a33ef9d1ffaefc0960410bf6"
+    },
+    {
+      "path": "deployments/oldpc/greg_events.py",
+      "bytes": 12618,
+      "sha256": "cac5288720ae2afe32d2205528f7478c2bc754bd9363e3f7b7cb8991214b195a"
+    },
+    {
+      "path": "deployments/oldpc/greg_experience.py",
+      "bytes": 22705,
+      "sha256": "66090eefc9d3e91560a1dccda9e670b7bd76cb28ec8815455085b94b5ad6756a"
+    },
+    {
+      "path": "deployments/oldpc/greg_first_memory.py",
+      "bytes": 8959,
+      "sha256": "4fbe34b76081ac3a0b5627311febf6d38c0025d23fb19e1ef514d79db6b378b2"
+    },
+    {
+      "path": "deployments/oldpc/greg_game_tasks.py",
+      "bytes": 23289,
+      "sha256": "782d1746e4de53bbcdc7e3c01e6c0d3678958dbeaebb35577dc6effff25ce57f"
+    },
+    {
+      "path": "deployments/oldpc/greg_goal_lifecycle.py",
+      "bytes": 4954,
+      "sha256": "bd4bdf3a28c5945d057b680f64917ab2d28f9cac5ea6acc4f998d2e1b7ed7cf7"
+    },
+    {
+      "path": "deployments/oldpc/greg_landmark.py",
+      "bytes": 2922,
+      "sha256": "aa9a9588a7620bfa35b5e5c70fdbe8efbd1a59fb2fdacf109ad6eba4caac12e1"
+    },
+    {
+      "path": "deployments/oldpc/greg_model.py",
+      "bytes": 2777,
+      "sha256": "06d6ae0f80bd6e76a1fec9e6b48f76f6caf7ce8908447baadeb0494dcf36d89b"
+    },
+    {
+      "path": "deployments/oldpc/greg_playercore.py",
+      "bytes": 29164,
+      "sha256": "2c9c2c296e0193d1ce3360dfa0eb66e813c3a8a004e7d0ccb3de9fbb71615711"
+    },
+    {
+      "path": "deployments/oldpc/greg_producers.py",
+      "bytes": 1676,
+      "sha256": "5e7ebaa6f3424a11279c80f6f038cc13120a69293c384554a1f283a20d931286"
+    },
+    {
+      "path": "deployments/oldpc/greg_recorder.py",
+      "bytes": 31211,
+      "sha256": "9012fb94adeff6fa1857e7283a5159b4c54688585dd6e7edf26468637ad84fbe"
+    },
+    {
+      "path": "deployments/oldpc/greg_sapi4.py",
+      "bytes": 3437,
+      "sha256": "f840401255dbd93557c06e90604f2b20f93664e1cb76bb4db3a85f117a7c0604"
+    },
+    {
+      "path": "deployments/oldpc/greg_social.py",
+      "bytes": 5614,
+      "sha256": "c2186545f209c4de6c6965c37e66d7dbbd79fcf15788ab1b22eab76ba4229072"
+    },
+    {
+      "path": "deployments/oldpc/greg_supervised.py",
+      "bytes": 61595,
+      "sha256": "b5230e86a6bc6032e3318841e63a357f042ccb17483eedca0c20b3c9da3f1c61"
+    },
+    {
+      "path": "deployments/oldpc/greg_vision_helper.py",
+      "bytes": 4190,
+      "sha256": "3c491e4314871d3362ebb46740f09193264ae1f41a2211b55373edc7035a043e"
+    },
+    {
+      "path": "deployments/oldpc/greg_voice_client.py",
+      "bytes": 16897,
+      "sha256": "999a3824b32bdabba12137e3f2f40e905194c023b298e6033e89676d14362f40"
+    },
+    {
+      "path": "deployments/oldpc/greg_voice_protocol.py",
+      "bytes": 837,
+      "sha256": "70b9e0bee4a8689ff779e6d9b877666b77e1b02e1a37af7557f866f6c88b58df"
+    },
+    {
+      "path": "deployments/oldpc/greg_voice_session.py",
+      "bytes": 16107,
+      "sha256": "db4e6c10c1d4c9ba55f7381cd22624edc9d678a7157091c8772098f48e59729c"
+    },
+    {
+      "path": "deployments/oldpc/lua/autorun/client/greg_bridge.lua",
+      "bytes": 26902,
+      "sha256": "3268fee0e5a807cffd915d3693f8cbea12587bbec9e9ed2e95d6c7922bc791b5"
+    },
+    {
+      "path": "deployments/oldpc/lua/autorun/server/greg_nav.lua",
+      "bytes": 7984,
+      "sha256": "9f05b31e2e1e8c7b9de3bd3be48a095e46cf379ff60d1979a9c103d65abb690c"
+    },
+    {
+      "path": "deployments/oldpc/lua/autorun/server/greg_spawn_observer.lua",
+      "bytes": 1401,
+      "sha256": "e8e8c3bf975d1c36d8868dd7c906d0b3ab16d59111fa9befa12ca0e98f8269c9"
+    },
+    {
+      "path": "deployments/oldpc/lua/autorun/server/greg_sv.lua",
+      "bytes": 8436,
+      "sha256": "c412750a0e1120202acc4faaae6967c834f2e1f14b250cc46d187ef8bb06c063"
+    },
+    {
+      "path": "deployments/oldpc/lua/greg_catalog.lua",
+      "bytes": 4467,
+      "sha256": "4f4ef9356f08a17a5a63a3d0cfe165252febdd7a296e7a4a6f9a606439f137fd"
+    },
+    {
+      "path": "deployments/oldpc/lua/greg_locomotion.lua",
+      "bytes": 9512,
+      "sha256": "9bb110535289cb80b5abe8b3538821e0b5a4b9dc13cabc6feb14299d5fcc18d2"
+    },
+    {
+      "path": "deployments/oldpc/lua/greg_rescue.lua",
+      "bytes": 6677,
+      "sha256": "f48bfbc4db31c8ac525e5ccaab98bc07d28f4c9b0ce31b9d1bf0ab7ab24d695b"
+    },
+    {
+      "path": "deployments/oldpc/requirements-inbox-media.txt",
+      "bytes": 15,
+      "sha256": "ae3337e5ae362bf1fad83355272ff595b58aae13d7a7ac67617f6f3161fa0c07"
+    },
+    {
+      "path": "deployments/oldpc/requirements-vision.txt",
+      "bytes": 27,
+      "sha256": "dbc95b74d18fc3770c157fa58d61f7cc94feb5c8b3c6bf1883eaed48fc31b07d"
+    },
+    {
+      "path": "deployments/oldpc/requirements.txt",
+      "bytes": 138,
+      "sha256": "35f23c18e60a0ba4bb2c4922a23e6898f8a4dcd97744041cf6e855d217641ffb"
+    },
+    {
+      "path": "docs/CORE_CONTROL_SLICE_1.md",
+      "bytes": 10166,
+      "sha256": "ed273be9b80de63033bd3476dfd871cbc1fd78d2cca819444689602bd964b780"
+    },
+    {
+      "path": "docs/CURRENT_ARCHITECTURE.md",
+      "bytes": 3056,
+      "sha256": "d79da0051fa38cedf953d02fdd9a556c2acdfc86e2b6dcb8b5649acb5f5489c1"
+    },
+    {
+      "path": "docs/DEPLOYMENT-2026-10-20.md",
+      "bytes": 5240,
+      "sha256": "9784a6604c522bfe0f98cced084750a0c0f1686632d0390f244e80946007eb3a"
+    },
+    {
+      "path": "docs/DISCORD_TEXT_MVP.md",
+      "bytes": 9580,
+      "sha256": "4a3264ef84471425521262edd8398008a7205830695b8ee138d6252c85235c9c"
+    },
+    {
+      "path": "docs/FIRST-MEMORY-GATE-A.md",
+      "bytes": 10610,
+      "sha256": "0b281a549d2d8cdf44a6c97588aaf2274c1ad7fbd700a92eded209bbc0e16126"
+    },
+    {
+      "path": "docs/GMOD_RECORDING_PRIMITIVES.md",
+      "bytes": 7720,
+      "sha256": "34e02f9962031f32c7168e719ca0333923a76514a41da3c6727e4ca76d67dda0"
+    },
+    {
+      "path": "docs/IMPORT.md",
+      "bytes": 5690,
+      "sha256": "38c404da63c2778158224c4d5f30d5271fa10a7ebcdc853f1140d38bb6cfb561"
+    },
+    {
+      "path": "docs/MEMORY-IMPROVEMENTS.md",
+      "bytes": 3542,
+      "sha256": "b9901383c255d7fab6c5233f5fbb8431f318c81c03948c725abfe592fe1f3208"
+    },
+    {
+      "path": "docs/MEMORY_ARCHITECTURE_V0_1.md",
+      "bytes": 7747,
+      "sha256": "e8c25d3d02afc4adf4ea436ca61b803030ca94663dea3dc2bb3ef9212fea6aff"
+    },
+    {
+      "path": "docs/NAVIGATION-CURBS.md",
+      "bytes": 2686,
+      "sha256": "88da832a10a25479b1098ede5482d8c502aae6d7eb90b9b0e1eeca8dcaff01f7"
+    },
+    {
+      "path": "docs/OLDPC-IMPORT.md",
+      "bytes": 545,
+      "sha256": "fd95f854fe59d71019343420d7c7e834773abacdf9e87aab9d0fbb7f031a5064"
+    },
+    {
+      "path": "docs/PLAN.md",
+      "bytes": 2782,
+      "sha256": "850a0a385f89c16e20d5d7b7cf0c2715445a6ff78302f643416635b86cc28989"
+    },
+    {
+      "path": "docs/RECORDER-BASELINE.json",
+      "bytes": 2048,
+      "sha256": "5b26e34a9bcb8839d91f11ce8f7f510fc9e7ee0f2bde2b026a5c68186d23355a"
+    },
+    {
+      "path": "docs/RECORDER-V0.1.md",
+      "bytes": 13541,
+      "sha256": "440324143ee1f8eba074901dda7e1383b4c7efe1944a08a5894a95b0697b9b95"
+    },
+    {
+      "path": "gregory_core/__init__.py",
+      "bytes": 82,
+      "sha256": "250c81178f993c01f003d0d6a1b7da6d540c7959eb77b511717fee567632767c"
+    },
+    {
+      "path": "gregory_core/canary.py",
+      "bytes": 13811,
+      "sha256": "df677d7faced09237caa1627ab28b861fbea13bd856d068efc0b839bbb1df60b"
+    },
+    {
+      "path": "gregory_core/canary_preflight.py",
+      "bytes": 9241,
+      "sha256": "b6c85a39ae5c4550c11b41f0632df3a2ad77233da6e0d2b40ff9369ac4fa88ec"
+    },
+    {
+      "path": "gregory_core/control_http.py",
+      "bytes": 5742,
+      "sha256": "3a13727b5bf459a4afcc7083f6fe7044d6417dd9a32ab3828581ea311d8d0d7c"
+    },
+    {
+      "path": "gregory_core/conversation.py",
+      "bytes": 7333,
+      "sha256": "12073f09c57ee9d85b989412f687bc0319f25c5f6f045fba895e6b632296a100"
+    },
+    {
+      "path": "gregory_core/decision_contract.py",
+      "bytes": 9393,
+      "sha256": "cdf4ea1a6cc1d9b4cb82dcc1f546a7b5b045028c4f9726273db5e6d37c8a2573"
+    },
+    {
+      "path": "gregory_core/dialogue.py",
+      "bytes": 2441,
+      "sha256": "bd7289048d476964b1a6adcca1a82c2acc2c813bbf60d64b9f30c514ef4bb1f2"
+    },
+    {
+      "path": "gregory_core/discord_text.py",
+      "bytes": 21093,
+      "sha256": "19d518a817847c2585823a9caf28c8c4ade2e4a947e56721dbf73678b161d4c6"
+    },
+    {
+      "path": "gregory_core/embeddings.py",
+      "bytes": 2431,
+      "sha256": "4fc4c80912bb13cccd5e4e230ad5c0ae9d15eb6776f3c1f99586ff7c0f235d48"
+    },
+    {
+      "path": "gregory_core/evaluation.py",
+      "bytes": 1559,
+      "sha256": "4228758b4e5a28eeda540c42a9b8f4e291b8d27ce5d57cf2e92e23fc6b25dc9f"
+    },
+    {
+      "path": "gregory_core/gmod_recording.py",
+      "bytes": 11682,
+      "sha256": "764cb68d211bdd0165bc1db743b17fbbc796aa3e0b42a04cf70927928259eea4"
+    },
+    {
+      "path": "gregory_core/inbox.py",
+      "bytes": 11763,
+      "sha256": "5390613670b5f27cfe137ed000864703a5fc9f4b6b0116fd5a598efe42bb9e4a"
+    },
+    {
+      "path": "gregory_core/inbox_http.py",
+      "bytes": 2911,
+      "sha256": "ecdba6c93949a2f88318ebd96b3f085464d486f4839c0f235e733339922b2348"
+    },
+    {
+      "path": "gregory_core/inbox_media.py",
+      "bytes": 14693,
+      "sha256": "70e07fa7d99feeb6414d97ba0dae896b87a5c51fca1d06250266522c0825b004"
+    },
+    {
+      "path": "gregory_core/inbox_pins.py",
+      "bytes": 3092,
+      "sha256": "a09b4cf488ea24795d72b6f2eb4264f40391a14e38603a65488e928d7a9bdaa3"
+    },
+    {
+      "path": "gregory_core/memory.py",
+      "bytes": 35190,
+      "sha256": "10e811bc7e3ecdd48a10bbf8cd484613b829c0372332e281541b368b9e41eae7"
+    },
+    {
+      "path": "gregory_core/model_task.py",
+      "bytes": 1624,
+      "sha256": "043398bf49d67cbd245be0e6cc037ebfb89db05e032f268d8705254da2844fd9"
+    },
+    {
+      "path": "gregory_core/provider_reply.py",
+      "bytes": 200,
+      "sha256": "63d7acf6db0896f1f0f17c815bbab519cf5d05a4cdfc9ce96418bb5546a7a68a"
+    },
+    {
+      "path": "gregory_core/recall_context.py",
+      "bytes": 1268,
+      "sha256": "39d6f5b2c33983b570846cc3db212b2c7cb10010dfac9808e0153e4cbaee1ff6"
+    },
+    {
+      "path": "gregory_core/runtime.py",
+      "bytes": 47302,
+      "sha256": "44e1d21e521e21fb4d87268547d40c8dc37b202d5fcb05265ddbfda9a5891237"
+    },
+    {
+      "path": "gregory_core/screen.py",
+      "bytes": 9713,
+      "sha256": "cb52cdd28ac7a589abb2c26f7262a00925bcc5ba3ba937f2fe99f7e7e0270c5b"
+    },
+    {
+      "path": "gregory_core/supervised_game.py",
+      "bytes": 8616,
+      "sha256": "c86a821c09f22056eab9da22b62ef239df8c0c12150a686b51c1a06b094ff9bb"
+    },
+    {
+      "path": "gregory_core/web/control.html",
+      "bytes": 7973,
+      "sha256": "5e2f668dc9179d6f00912e2075a969ca97a7b7f77c16687a0279b62a068912f4"
+    },
+    {
+      "path": "tests/_core_fixtures.py",
+      "bytes": 2460,
+      "sha256": "bfaa9513f743bda0f5b85203c36f009a9621eab3dd4a987e37aeb5d7df72ceca"
+    },
+    {
+      "path": "tests/test_autonomous_rest_budget.py",
+      "bytes": 4800,
+      "sha256": "1f0d99010be1355d32fe4bbb1a11263a16b31e716add687d4fa42e236ad44599"
+    },
+    {
+      "path": "tests/test_bridge_deadline.py",
+      "bytes": 6160,
+      "sha256": "23043fc4839de09bffb5b3a73cc35c5dc8b4bf6a2fa28d141d0576005737fde7"
+    },
+    {
+      "path": "tests/test_bridge_shutdown.py",
+      "bytes": 11820,
+      "sha256": "650fcf02f773683edcd778533c7249318307ff523561090007db48a1441846ea"
+    },
+    {
+      "path": "tests/test_canary_supervision_fixes.py",
+      "bytes": 6816,
+      "sha256": "81fbf5dbeaf8ed6b559c023ab1c9ec0ab4756f46f371165d611baaccc7e6e051"
+    },
+    {
+      "path": "tests/test_cookie_silence.py",
+      "bytes": 8713,
+      "sha256": "24fe0ac101055db73f6199475986432cd5118bdadacc19200a989ac01eaa1c4f"
+    },
+    {
+      "path": "tests/test_core_embeddings.py",
+      "bytes": 4639,
+      "sha256": "38442b84c1608d62361f1277c8f5c14ccfc0e835643eae93ac69a3ef250cf347"
+    },
+    {
+      "path": "tests/test_core_game_authority.py",
+      "bytes": 14272,
+      "sha256": "8f8dbd60d920e2e407c79b31c38d2be7c8bec59ca181a5e9c3b25407855c2c03"
+    },
+    {
+      "path": "tests/test_core_harness.py",
+      "bytes": 9119,
+      "sha256": "37205226962e876da9d219e4241c7884a8ae93467975c4d777e5b0405bd47bd0"
+    },
+    {
+      "path": "tests/test_core_memory.py",
+      "bytes": 16530,
+      "sha256": "54481bd9231ae16db1e7df0cd9429c205ec109f9e47bdc4013127eb56d3ccd6b"
+    },
+    {
+      "path": "tests/test_core_model_deadline.py",
+      "bytes": 5638,
+      "sha256": "7390d34de9b2a1cd3cda9c5799e97dd000df5ed35b9077ee43fa212c6406f64d"
+    },
+    {
+      "path": "tests/test_core_runtime.py",
+      "bytes": 29660,
+      "sha256": "bdbdf0475b2107a3bf5c4dc7d6f17ad379508de61f506d380f91da14b8af7133"
+    },
+    {
+      "path": "tests/test_core_turn_priority.py",
+      "bytes": 5997,
+      "sha256": "999765a307c0db6d0216bad1736ecff12c253c5a26231079bcb72ba54f97ba9a"
+    },
+    {
+      "path": "tests/test_decision_contract.py",
+      "bytes": 11254,
+      "sha256": "85cc684b275f99d267ee7bf2a721d8c350d66ba0f08d844bf3d287c8cf7bae1a"
+    },
+    {
+      "path": "tests/test_dialogue_window.py",
+      "bytes": 2987,
+      "sha256": "f3a71f7394c94925d52c7a1640f4580b7821c925f1bd99744f266d49d9d09a7d"
+    },
+    {
+      "path": "tests/test_discord_inbox.py",
+      "bytes": 4425,
+      "sha256": "12d482c72450a455d9a9ea8bf6fef031e848ad533033f30d4b4c817639a1e6bf"
+    },
+    {
+      "path": "tests/test_discord_inbox_context.py",
+      "bytes": 2873,
+      "sha256": "681bac8c4462cdec5f5404f1ad68bd8af7a3538c469486d36d48dea6abaf5c1a"
+    },
+    {
+      "path": "tests/test_discord_inbox_media.py",
+      "bytes": 8811,
+      "sha256": "c5d12fe302ba26fa362b979f4c568181f635ea5c40cba68318937bccffb251c1"
+    },
+    {
+      "path": "tests/test_discord_inbox_schedule.py",
+      "bytes": 1896,
+      "sha256": "5e648baec531c0c759253e48e6955aa47bcfc11643ed395eb4153af4e6c30011"
+    },
+    {
+      "path": "tests/test_discord_inbox_voice.py",
+      "bytes": 7814,
+      "sha256": "2f2541ce7b31cd580b2da8f3d07f259f33f9a85feeb1e51f8889dd35df060726"
+    },
+    {
+      "path": "tests/test_discord_lookup_budget.py",
+      "bytes": 8262,
+      "sha256": "9403ff1d2817fad8254438c0d5cd8aaf32b1b68027d97f58ebc5df9bf9b716d8"
+    },
+    {
+      "path": "tests/test_discord_ordinary_dialogue.py",
+      "bytes": 2897,
+      "sha256": "bc8a708f0868a71ae6b66939ab538356aa1eab474749da7e6104d86ee8d1f4ca"
+    },
+    {
+      "path": "tests/test_discord_retrieval_degraded.py",
+      "bytes": 9895,
+      "sha256": "2b1340f100c27b9d945bfc7f8623412ff885ddc959f4799e725b7d4a19ce6b87"
+    },
+    {
+      "path": "tests/test_discord_review_fixes.py",
+      "bytes": 7645,
+      "sha256": "b208fb35615be376f6df35fabe0bfb8381af1092fb8fe999c33ad238dd4ea1af"
+    },
+    {
+      "path": "tests/test_discord_runner.py",
+      "bytes": 3768,
+      "sha256": "fb6b8b62da3dd9db0e54aae2c47229bb3b1eba346163973834317c9fa52b189e"
+    },
+    {
+      "path": "tests/test_discord_text.py",
+      "bytes": 13024,
+      "sha256": "77d0cd9b19ca0cd5f1dce165bcb381a09a5e46cafb36459210157da125ae3230"
+    },
+    {
+      "path": "tests/test_discord_working_context.py",
+      "bytes": 11102,
+      "sha256": "20755a6dbf348fe7a641aeb4a81a441c50625dc3908cb0315c4748c5798e21f4"
+    },
+    {
+      "path": "tests/test_dm_context_window.py",
+      "bytes": 3684,
+      "sha256": "7eb9a44fd3ccc10f063568c44c7af0f1a90a54375d3bfced5099ad51ef11279c"
+    },
+    {
+      "path": "tests/test_events.py",
+      "bytes": 3237,
+      "sha256": "ad42a54871959cec5bba01168254f40e979012cbd8090155fffc1903abd82edb"
+    },
+    {
+      "path": "tests/test_experience_trace.py",
+      "bytes": 10959,
+      "sha256": "37d0453dc4d0c913ef71be1527f0082deaf697fbc0725f2b4f99d06703f01015"
+    },
+    {
+      "path": "tests/test_first_memory.py",
+      "bytes": 28893,
+      "sha256": "4ca5f4949c16a85cb4cd7207fe985350ffcd5321f828fc53a05b33782be00d46"
+    },
+    {
+      "path": "tests/test_first_memory_collector.py",
+      "bytes": 10126,
+      "sha256": "e3f8ebb43ad25b9193df091e33ba2a1952a52e5bf80e7b3f6cb3bf29341446a0"
+    },
+    {
+      "path": "tests/test_game_screen_integration.py",
+      "bytes": 7075,
+      "sha256": "7202132d38956d1f6590732d249a01a7a30c4fc6b901f9694b94f195adca917f"
+    },
+    {
+      "path": "tests/test_gmod_recording.py",
+      "bytes": 17223,
+      "sha256": "290e09a120e67c96e97efe2ea5291142a027c01dec4dd964af2d0a76f66b52a7"
+    },
+    {
+      "path": "tests/test_harness_lead_roles.py",
+      "bytes": 3141,
+      "sha256": "c9c54fbbe89bce58f36cebc62165ab4d07859f61a9ce758776d500cfea0a8e92"
+    },
+    {
+      "path": "tests/test_harness_ledger.py",
+      "bytes": 3673,
+      "sha256": "c578af31135582bdc1f9b6b41f99fff30fb8b12bc910448a83030e9fd807a233"
+    },
+    {
+      "path": "tests/test_harness_wording.py",
+      "bytes": 4513,
+      "sha256": "3027e4355e677f8506b52af90165a898144323ac8f04e027de653201938e2568"
+    },
+    {
+      "path": "tests/test_inbox_media_selection.py",
+      "bytes": 1587,
+      "sha256": "d3540441c4b4882f3f3c775238f1bcc698ef27473008fec589238876ea1c6475"
+    },
+    {
+      "path": "tests/test_inbox_pins.py",
+      "bytes": 3239,
+      "sha256": "2d4724386acc18edab9818b647b75bfa44939eca7f652520056c1aa569a929b5"
+    },
+    {
+      "path": "tests/test_live_vc_fixes.py",
+      "bytes": 8280,
+      "sha256": "a01caceefc7479ae5d447e3b2126925417858eee4a25b1c45ea09d884d359062"
+    },
+    {
+      "path": "tests/test_locomotion.lua",
+      "bytes": 3934,
+      "sha256": "fe260f4dc1b7b4fe26dc0f8d7090f656ad29c72a65183ce2e7d94be5f249717c"
+    },
+    {
+      "path": "tests/test_memory_consistency.py",
+      "bytes": 13897,
+      "sha256": "a3f23091444a0a1f48f3ee9641ce3d9ec1b83e27b161aab64294a3e473738ba4"
+    },
+    {
+      "path": "tests/test_memory_decisions.py",
+      "bytes": 8888,
+      "sha256": "9d4678bd8d927b776aa6b8bc039968fc8f6ac0c2395f8b7e35c63130259b39a2"
+    },
+    {
+      "path": "tests/test_model_budget.py",
+      "bytes": 2359,
+      "sha256": "623ed4846c16c2f39a8b4cbc2790849e00b47354baa231821540d29e25d425c3"
+    },
+    {
+      "path": "tests/test_player_game_tasks.py",
+      "bytes": 7575,
+      "sha256": "88d6589f4809421f4c4ccbc54d18b17acee1c928f63aff053f264d36d8e77e78"
+    },
+    {
+      "path": "tests/test_provider_reply_contract.py",
+      "bytes": 8081,
+      "sha256": "c18e8281f35e4d10b0bbcaabe0456a7bd0609d7d04abdf94a773179ea2530e89"
+    },
+    {
+      "path": "tests/test_recorder_integration.py",
+      "bytes": 23723,
+      "sha256": "320f47ef7466a9981818e8c72b10aa4ae3a8eacc91f020be2f1dadd1243c1301"
+    },
+    {
+      "path": "tests/test_recorder_review_fixes.py",
+      "bytes": 16787,
+      "sha256": "f8c3c2ffd598e84d92587b3d451da4d43b0be762981f0f8228e3566f4a3ac017"
+    },
+    {
+      "path": "tests/test_recorder_storage.py",
+      "bytes": 10617,
+      "sha256": "c8b2e0d0bed31d8f6cab9329aa670e0f2838fe9eabbfc88a745ed4d5544de283"
+    },
+    {
+      "path": "tests/test_reply_surface.py",
+      "bytes": 1748,
+      "sha256": "9fe8412a6c7cf53526c0d64bb54d3768cc5e344aca22a88c51ec0288a98841c7"
+    },
+    {
+      "path": "tests/test_retrieval_naturalness.py",
+      "bytes": 13246,
+      "sha256": "f860bed3706f89b6320df50a0c7a006d2d7f2efd7074d64765bd3f696cc54e5e"
+    },
+    {
+      "path": "tests/test_sapi4_engine_launch.py",
+      "bytes": 2818,
+      "sha256": "ed2822b7bf3cc2111f3967f34f36840e063c7a48035c4f662e30d5e9728b6bbc"
+    },
+    {
+      "path": "tests/test_screen_tool.py",
+      "bytes": 8253,
+      "sha256": "1c491cbacc26fb97dfc8a0a71faffb6ff7991cbf77425b9311beea5fb9d6b615"
+    },
+    {
+      "path": "tests/test_supervised_bridge.py",
+      "bytes": 6289,
+      "sha256": "0414ddd34f4c6964ae170944ef709d94629135f3af9dd8c561b99c6d1fe43ce9"
+    },
+    {
+      "path": "tests/test_supervised_game.py",
+      "bytes": 5873,
+      "sha256": "a1eeca69974cdc163437d231eea6f4a3427f1a9de4cc0550a6ee65889d47450b"
+    },
+    {
+      "path": "tests/test_supervised_sensor.py",
+      "bytes": 14536,
+      "sha256": "dd776d1fba4c95513a404e57cf60bf53233c6ebeff1308979a18f9603508de7d"
+    },
+    {
+      "path": "tests/test_task_coordination.py",
+      "bytes": 6261,
+      "sha256": "62fa54f109abd4707f0aad40aba63d1f2f77d1aa700f8c3db93336ef82507c0a"
+    },
+    {
+      "path": "tests/test_task_retry_exhaustion.py",
+      "bytes": 7273,
+      "sha256": "3b407f59f158b844b82408805382e8d9e3a7d5616b4aefe460229018153b4499"
+    },
+    {
+      "path": "tests/test_task_terminal_truth.py",
+      "bytes": 2442,
+      "sha256": "2945fb43d2b9efe015514437dc25f6825edf3c368f28ad8b4800c401a7872dcb"
+    },
+    {
+      "path": "tests/test_vc_game_tasks.py",
+      "bytes": 8771,
+      "sha256": "8176d626e07be942f064b2b5c9a051429d9c04a2ea9d30a611a2b85b0255cc05"
+    },
+    {
+      "path": "tests/test_voice_clock.py",
+      "bytes": 5500,
+      "sha256": "72742c36d8ab86cf24a494494e3944666fa0c66992287d8ab70f5c24b1849328"
+    },
+    {
+      "path": "tests/test_voice_expiry.py",
+      "bytes": 2559,
+      "sha256": "d0aa00e6affea0bd318d9763a8ba5fe6075ff197f4dda15d2a84a6c53eb9da58"
+    },
+    {
+      "path": "tests/test_voice_handoff.py",
+      "bytes": 21150,
+      "sha256": "2ee1ca67e0f931551c88f2a45f00773dd06548c8716e6b225ce01269e1a383af"
+    },
+    {
+      "path": "tests/test_voice_keepalive.py",
+      "bytes": 2361,
+      "sha256": "3daeea5a919133801f7a04ae47e30cc07bb472afd9d20006feb1fe5b01ae6742"
+    },
+    {
+      "path": "tests/test_voice_prompt_budget.py",
+      "bytes": 4390,
+      "sha256": "3987be6384ec6163faa221d72398feb2f48c05a7d11f14ddfa0be6f550bde665"
+    },
+    {
+      "path": "tests/test_voice_turn_taking.py",
+      "bytes": 9748,
+      "sha256": "25ab95e19de60dab12df77072299c1b0fb8d166327513eda7b96195c446ddc9e"
+    },
+    {
+      "path": "tools/core_fixture_experience.py",
+      "bytes": 2782,
+      "sha256": "2475283a9658676e4bb026ceba6507b57925320d1d3d29fe7581be62020a3724"
+    },
+    {
+      "path": "tools/greg_canary_monitor.py",
+      "bytes": 7997,
+      "sha256": "c1067e78c8cd3cb6140ea43fe3dfbbd3629beeb0468c4d514a41126732df2788"
+    },
+    {
+      "path": "tools/greg_experience.py",
+      "bytes": 4628,
+      "sha256": "e31504c36334be2757f3b63202517fcd36694cd9ab5ad96abea99a7019c84700"
+    },
+    {
+      "path": "tools/greg_first_memory.py",
+      "bytes": 3422,
+      "sha256": "5455d77cab38da7a998c773a651269c829935224eb64a0111fce2e9736fe314d"
+    },
+    {
+      "path": "tools/greg_memory_demo.py",
+      "bytes": 3116,
+      "sha256": "5fcb4f19e8a21888f257de6f17b16fb44c079455ea4d23d913eb40359e73429e"
+    },
+    {
+      "path": "tools/gregory_control.py",
+      "bytes": 6374,
+      "sha256": "7b5d526a5b769fb0e9901ea8f8585422364982b916173b1c2e6a9b557eda7238"
+    },
+    {
+      "path": "tools/gregory_discord_inbox.py",
+      "bytes": 7394,
+      "sha256": "9ae7ec876c6ec8a1a7f332a850d7087c56054b081e3ca970c82b6f3b90870a17"
+    },
+    {
+      "path": "tools/gregory_discord_text.py",
+      "bytes": 8224,
+      "sha256": "71e8f89a37899e691ffd245d9d2916309604a901a692048f1a6eee31a63a9239"
+    },
+    {
+      "path": "tools/gregory_gmod_adapter.py",
+      "bytes": 3973,
+      "sha256": "08eacd115a016b7af18a82effda6ed7d81627df5546464d0761bb529e0106e4d"
+    },
+    {
+      "path": "tools/gregory_inbox_host.py",
+      "bytes": 2457,
+      "sha256": "546fb06dfa553be049b085bb8d3e9efe6114a518ee775cfcc3256dff4958cce4"
+    },
+    {
+      "path": "tools/gregory_inbox_model_test.py",
+      "bytes": 5494,
+      "sha256": "be597c8e38a96ed6d0980c3d34e4832dd721cf74c039f6ea97216f438e8d5c48"
+    },
+    {
+      "path": "tools/gregory_reembed.py",
+      "bytes": 2131,
+      "sha256": "fdb4b9e18177abf56606cb4a9d2c870184dab1851dabbf8ed63ca501fc3f5a54"
+    },
+    {
+      "path": "tools/gregory_screen_probe.py",
+      "bytes": 3058,
+      "sha256": "9251014abf12249ebaecb05633600207bc617801550142d4a5ed1f5e7dfaf545"
+    },
+    {
+      "path": "tools/lms_embedder.py",
+      "bytes": 2746,
+      "sha256": "e7ee0d67738a091517015ee46ed78c07f9f3355c2d4995f52af0caf0eb68300f"
+    }
+  ]
+}

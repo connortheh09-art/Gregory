@@ -1,3 +1,7 @@
+# Gregory — current source recovery
+
+**2026-11-12 recovery snapshot:** start with [RESTORE.md](RESTORE.md). This branch preserves qualified Core/voice-client source and the current seven Lua files; it is not a turnkey voice installer or a full memory backup. The historical overview below predates Core and is retained for context.
+
 # Gregory — Garry's Mod bot
 
 An LLM-driven player that actually plays Garry's Mod: a Python bridge talks to a Lua addon inside
@@ -35,9 +39,6 @@ tools/       helper scripts (start/stop, QA)
 ```
 
 ## Notes
-
-- **Core engineering:** consult the [source-pinned reference library](docs/reference-library/README.md)
-  before substantial new subsystems. Borrow focused patterns; keep Gregory Core authoritative.
 
 - Nothing in here should contain tokens, keys, or machine-specific credentials. `.gitignore` covers
   the usual suspects; scrub before committing.
