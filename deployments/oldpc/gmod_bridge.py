@@ -1277,13 +1277,14 @@ def inspect(helper: str, state: dict, reason: str, python: str = '', supervised=
 
 def source_manifest():
     import hashlib
+    from greg_events import MANIFEST_FILES
     root = Path(__file__).resolve().parent
     # Hash only files actually accessible here; this does NOT attest to installed
     # addon copies, launcher arguments or a deployed Git commit.
     paths = sorted(root.glob('*.py')) + sorted((root / 'lua').rglob('*.lua'))
     files = [{'id':p.relative_to(root).as_posix(), 'version':hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in paths]
-    return {'files':files[:32], 'truncated':len(files)>32, 'coverage':'collector_tree_snapshot',
+    return {'files':files[:MANIFEST_FILES], 'truncated':len(files)>MANIFEST_FILES, 'coverage':'collector_tree_snapshot',
             'build_commit':'unknown', 'base_commit':'194ed3d2841a72ed1c2915f32d470f09d7f352a9'}
 
 
