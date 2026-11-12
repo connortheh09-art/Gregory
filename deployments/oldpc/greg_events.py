@@ -70,6 +70,11 @@ def safe_text(value, limit=2048):
     return value[:limit]
 
 
+# The one bound for build-manifest files: gmod_bridge.source_manifest() imports it, so the
+# emitter and this sanitizer cannot drift apart.
+MANIFEST_FILES = 64
+
+
 def sanitize(value, *, visible=False, depth=0, key=''):
     """Fail closed on unknown fields. All collections are bounded before encoding."""
     if depth > 8:
@@ -104,7 +109,7 @@ def sanitize(value, *, visible=False, depth=0, key=''):
                 result[k] = sanitize(v, visible=visible, depth=depth+1, key=k)
         return result
     if isinstance(value, (list, tuple)):
-        cap = 256 if key == 'points' else 32 if key in {'observation_ids', 'evidence_ids', 'links', 'files'} else 12
+        cap = 256 if key == 'points' else MANIFEST_FILES if key == 'files' else 32 if key in {'observation_ids', 'evidence_ids', 'links'} else 12
         return [sanitize(v, visible=visible, depth=depth+1) for v in value[:cap]]
     if isinstance(value, bool): return value
     if isinstance(value, (float, int)):
