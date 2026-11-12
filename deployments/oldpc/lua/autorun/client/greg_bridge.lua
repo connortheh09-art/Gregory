@@ -17,6 +17,14 @@ local CV_CORE = CreateClientConVar("greg_playercore", "0", true, false)
 local locomotion = include("greg_locomotion.lua")
 local rescue = include("greg_rescue.lua")
 local catalog = include("greg_catalog.lua")
+-- Direct control (docs/GMOD_CONTROLLER.md). Optional: without the module, drive is not
+-- advertised and a fenced wait still releases like a legacy one.
+local drive = include("greg_drive.lua")
+if type(drive) ~= "table" then
+    drive = { release = function() end, step = function() return false end, watch = function() end,
+              receive = function(a) return type(a) == "table" and a.action == "wait" and "released" or "ignored" end }
+end
+local CV_DIRECT = CreateClientConVar("greg_direct", "0", true, false) -- kill switch; default is Connor's call
 if type(locomotion) ~= "table" or type(rescue) ~= "table" then
     print("[greg] helper modules unavailable; client bridge disabled")
     return
@@ -201,8 +209,9 @@ local function buildState(lp)
 	end
 	local wep = lp:GetActiveWeapon()
 	return {
-		capabilities = { playercore = CV_CORE:GetInt() == 1 },
+		capabilities = { playercore = CV_CORE:GetInt() == 1, drive = CV_DIRECT:GetInt() == 1 and drive.VERSION or nil },
 		locomotion = locomotion.status(),
+		drive = CV_DIRECT:GetInt() == 1 and drive.VERSION and drive.telemetry(lp, SysTime()) or nil,
 		rescue = rescue.report(),
 		waterLevel = lp:WaterLevel(),
 		moveType = lp:GetMoveType(),
@@ -268,7 +277,7 @@ local function buildState(lp)
 	}
 end
 
-local function releaseKey()
+local function releaseLegacy()
 	holdGen = holdGen + 1           -- invalidate any pending release
 	for bind in pairs(moveKeys) do RunConsoleCommand("-" .. bind) end
 	moveKeys = {}
@@ -280,6 +289,12 @@ local function releaseKey()
 	end
 end
 
+-- Every interlock and legacy movement verb also ends a drive hold.
+local function releaseKey(reason)
+	drive.release(reason or "interlock")
+	releaseLegacy()
+end
+
 -- Generation-tagged release: an old timer can never release a NEWER hold.
 local function scheduleRelease(hold, default)
 	holdGen = holdGen + 1
@@ -288,7 +303,7 @@ local function scheduleRelease(hold, default)
 	if dur ~= dur or dur == math.huge or dur == -math.huge then dur = default end
 	dur = math.Clamp(dur, 0.05, 3)
 	timer.Simple(dur, function()
-		if gen == holdGen then releaseKey() end
+		if gen == holdGen then releaseLegacy() end
 	end)
 end
 
@@ -318,7 +333,15 @@ local function runAction(a)
 	if not active(lp) then releaseKey() return end
 	compoundSpeech(a.speech)
 
-	if act == "navigate" then
+	if act == "drive" then
+		if CV_DIRECT:GetInt() ~= 1 then drive.release("disabled") return end
+		local outcome, fresh = drive.receive(a, SysTime(), lp)
+		if outcome == "applied" and fresh then
+			-- A new decision preempts legacy holds and routes; renewals change nothing else.
+			releaseLegacy() locomotion.cancel("direct") rescue.abort(lp, SysTime())
+		end
+		return
+	elseif act == "navigate" then
 		if CV_CORE:GetInt() ~= 1 then return end
 		releaseKey()
 		if locomotion.start(a, SysTime(), lp) then rescue.arm(lp, SysTime()) end
@@ -330,9 +353,11 @@ local function runAction(a)
         end
 		return
 	elseif act == "wait" then
+		-- A fenced stop from a retired controller run is ignored entirely (receiver rule).
+		if a.ctl ~= nil and drive.receive(a, SysTime(), lp) ~= "released" then return end
 		locomotion.cancel("stopped")
 		if a.rescueEligible then rescue.preserve(SysTime(), lp) else rescue.abort(lp, SysTime()) end
-		releaseKey()
+		releaseKey("stop")
 		return
 
 	elseif act == "move" then
@@ -657,6 +682,14 @@ hook.Add("Think", "greg_rescue_cleanup", function()
 end)
 hook.Add("CreateMove", "greg_continuous_control", function(cmd)
     local lp = LocalPlayer()
+    -- Interlocks, then drive while it holds, otherwise rescue and locomotion. Drive is not
+    -- gated on greg_playercore, which is the route helper.
+    if not active(lp) or lp:InVehicle() or CV_DIRECT:GetInt() ~= 1 then
+        drive.release("interlock")
+    else
+        drive.watch(lp, SysTime())
+        if drive.step(cmd, lp, SysTime(), FrameTime()) then return end
+    end
     if CV_CORE:GetInt() ~= 1 or not active(lp) or lp:InVehicle() then
         locomotion.cancel("interlock")
         if IsValid(lp) then rescue.abort(lp, SysTime()) rescue.cleanup(lp, SysTime()) end
