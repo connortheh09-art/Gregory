@@ -9,7 +9,10 @@ semantics for the Lua work and the later live checks.
 Slice 2 adds the typed `control` decision Gregory uses to move his own body. It is wired into
 `gmod_bridge.py` only through the `DIRECT_CONTROL` seam, which stays `None` until the
 one-writer integration builds the controller, so nothing is offered to the model or sent to
-the game yet.
+the game yet. A Lua draft accompanies it (`lua/greg_drive.lua`, its hooks in
+`greg_bridge.lua`, and `tests/test_drive.lua`). It has **never been run**: the reviewer
+container has no Lua runtime. `greg_direct` defaults to `0` in the draft, so nothing changes
+until it is switched on.
 
 ## Controller runs
 
@@ -247,7 +250,8 @@ a legitimate restart, a retired run's stop, and malformed ids.
   accepted, like a jump tap. Renewals never press again.
 - **Jump.** `tap` presses `IN_JUMP` for exactly one command on the first grounded CreateMove
   after a *new* generation is accepted. Renewals never re-tap. If he isn't grounded within
-  0.5s, report `missed`. `hold` keeps `IN_JUMP` down while active (the game decides re-jumps).
+  0.5s, report `missed`. `hold` keeps him jumping. The draft re-presses `IN_JUMP` on each landing, because Source's
+  movement ignores a jump button still held from the previous command (VERIFY live).
   `crouch` holds `IN_DUCK`.
 - **Clearance.** Unlike legacy `move`, drive neither refuses on short clearance nor releases on
   a probe. It reports `blocked` (wishing to move, actual speed < 20% of target for >0.5s) and
