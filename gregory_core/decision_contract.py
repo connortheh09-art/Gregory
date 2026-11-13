@@ -78,7 +78,7 @@ CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_righ
 CONTROL_HINT=('DIRECT CONTROL (your own body, no task needed): {"action":"control","command":"drive","move":"forward","pace":"walk","seconds":3}. '
     'move is relative to your facing. look P#/D# keeps facing that person/place (with forward you walk there and stop near it); '
     'turn_*, up/down/level turn once. jump tap|hold, crouch, use (press once), fly on|off, vertical up|down while flying. '
-    'Lasts seconds (1-30); a new control replaces it; {"action":"control","command":"stop"} stops now. Control ends any game task; tasks suit long trips. ')
+    'Lasts seconds (1-30); a new control replaces it; {"action":"control","command":"stop"} stops it now (a task continues; cancel a task with game_task cancel). A drive ends any game task; tasks suit long trips. ')
 
 def control_intents(control,players=(),destinations=()):
     """Drive/stop branches when the adapter offers control; look targets are this turn's labels."""

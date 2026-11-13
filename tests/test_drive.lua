@@ -206,10 +206,12 @@ end
 do
     local drive = load()
     drive.receive(hold(1, { ctl = 11 }), 0, lp)
+    run(drive, 0, 3)
     check(drive.receive({ action = 'wait', ctl = 10, driveGen = 9 }, .1, lp) == 'retired_controller', 'retired stop refused')
     check(drive.active(), 'hold survives a retired stop')
     check(drive.receive({ action = 'wait', ctl = 11, driveGen = 2, reason = 'model_stop' }, .2, lp) == 'released', 'own stop')
     check(not drive.active() and drive.telemetry(lp, .2).lastEnd == 'model_stop', 'released with its reason')
+    check(#drive.telemetry(lp, .2).held == 0, 'a stop clears held inputs before the next command')
 end
 
 -- 8. A noclip toggle is sent once per generation and judged by the observed move type.

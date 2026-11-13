@@ -151,8 +151,9 @@ carries his reply. No task is needed.
   delivery stamp (as tasks do), an owner turn, `DIRECT_CONTROL`, and for a drive the offer in
   the decision's options and a view binding that matches the live world. A stop is never
   refused for staleness.
-  - *Accepted* drive or stop: the current game task is invalidated and PlayerCore's goal ends
-    (`core_direct_control`). The authority notes `control` with
+  - *Accepted* drive: the current game task is invalidated and PlayerCore's goal ends
+    (`core_direct_control`). An accepted stop ends direct control only and lets route helpers
+    write again; a task keeps going. Ending a task is the deliberate task `cancel`. The authority notes `control` with
     `qualification: requested_not_confirmed`. Game evidence still comes only from telemetry.
   - *Refused*: nothing changes, the spoken line is replaced, and the authority notes
     `control_refused`. It is not a task refusal, so it starts no recovery turns.
@@ -337,7 +338,8 @@ sent a verb it would silently ignore.
    about 615 chars, which comes out of recent dialogue first. On the worst-case fixture view
    (8 destinations) very little dialogue is left. Options: trim `GameTasks.instruction`, or
    show fewer destinations when control is offered.
-9. A control stop also ends the current game task ("stop" means stop everything).
+9. Decided (Connor): a control stop does not end the current task; "cancel your task" is the
+   task `cancel`.
 
 ## Running the fixtures
 
