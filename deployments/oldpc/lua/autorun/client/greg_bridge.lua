@@ -21,7 +21,7 @@ local catalog = include("greg_catalog.lua")
 -- advertised and a fenced wait still releases like a legacy one.
 local drive = include("greg_drive.lua")
 if type(drive) ~= "table" then
-    drive = { release = function() end, step = function() return false end, watch = function() end,
+    drive = { release = function() end, step = function() return false end, watch = function() end, sample = function() end,
               receive = function(a) return type(a) == "table" and a.action == "wait" and "released" or "ignored" end }
 end
 local CV_DIRECT = CreateClientConVar("greg_direct", "0", true, false) -- kill switch; default is Connor's call
@@ -688,6 +688,7 @@ hook.Add("CreateMove", "greg_continuous_control", function(cmd)
         drive.release("interlock")
     else
         drive.watch(lp, SysTime())
+        drive.sample(lp, SysTime())
         if drive.step(cmd, lp, SysTime(), FrameTime()) then return end
     end
     if CV_CORE:GetInt() ~= 1 or not active(lp) or lp:InVehicle() then

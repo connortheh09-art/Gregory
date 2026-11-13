@@ -1,4 +1,4 @@
-# gmod_controller: Slice 1 (stop/release core), Slice 2 (Core's control decision) and the Lua drive/noclip spec
+# gmod_controller: Slice 1 (stop/release core), Slice 2 (Core's control decision), Slice 3 (what the game observed) and the Lua drive/noclip spec
 
 Status: revised candidate (R3) after Gordon's reviews. Those reviews found that fences and
 evidence were not scoped to a controller run or actor (R1–R3), and that run ids from the wall
@@ -161,6 +161,39 @@ carries his reply. No task is needed.
     `yield_to_task()`: a held drive is stopped (`task_selected`) and route helpers may write
     again (`allow_tasks`). Continuing a task does not.
 
+## Slice 3: what the game observed
+
+Gregory sees what actually happened to his last control decision, not just that it was sent.
+Everything here comes from game telemetry; a missing fact is left out, never guessed.
+
+- **Result** (`gmod_controller.observed`, shown as `activity_options.control.result`). It only
+  counts telemetry that carries this controller run's id and comes from the actor and world the
+  decision was bound to. `status` is one of:
+  - `pending`: sent, not yet seen applied;
+  - `not_applied`: its intent ended and the game never showed it;
+  - `active`: the game holds it now; adds live `speed_mps`, `blocked`, and `jump`
+    (pending/done/missed);
+  - `ended`: with `ended` = time_up / stopped / lost_contact (renewals stopped arriving) /
+    task_took_over / replaced / interrupted (anything else, e.g. an interlock).
+  Also, when they belong to this decision: `fly` (pending/on/off/refused) and
+  `look: target_missing`.
+- **Motion** (from the Lua motion log, in metres, 1 u = 0.01905 m): `seconds`, `moved_m`
+  (straight line from where the decision started), `rise_m` (only if ≥ 8 u), `dropped_m` (only
+  if ≥ 1 m), `airborne`, and `air`: the last 3 airborne phases as
+  `{up_m, landed_m, fwd_m}`. `up_m` is the peak above takeoff; `landed_m` is the landing
+  height against takeoff, so a positive value means he landed on something higher.
+- **Freshness.** `CoreGameAuthority.offer` stores the control offer on every call (the other
+  activity options keep their 3s refresh), and a world change clears it.
+- **Players** in the task view now carry `distance_m` and `bearing_relative` (same convention as
+  destinations: 0 ahead, +90 left, −90 right). Positions still stay controller-side.
+- **Frames.** `ScreenBuffer.annotator` is an optional, game-neutral hook. The bridge sets it to
+  `DIRECT_CONTROL.since`, so an inspected frame's receipt gains
+  `game_facts: {moved_m_since, rise_m_since}`. That is how far he has moved between the capture
+  and the latest telemetry, interpolated over about 8s of position samples from the same world.
+  A failing or oversized note is dropped; the frame is never lost.
+- **Budget.** Evicted last, in this order: player bearings, then `control.result`, then the control
+  offer itself.
+
 ## Wire contract
 
 Hold, envelope `mode: "direct"`:
@@ -288,6 +321,17 @@ drive = { v=1, ctl=int, active=bool, gen=int, stopGen=int, held={"forward","spee
           noclip={want=..., state="idle"|"pending"|"active"|"off"|"refused", gen=int},
           reject={gen=..., reason=...}, lastEnd="lease_expired"|"stop"|"interlock"|... }
 ```
+Slice 3 adds `motion` and `prevMotion`, the motion logs of the latest and the previous
+generation (game units):
+```lua
+motion = { gen=int, ctl=int, t=<s since accepted>, moved=<straight line>, path=<distance walked>,
+           dz=<height now - start>, peak=<max rise>, low=<min>, phases=int, drop=<largest drop>,
+           air={ {up=, land=, dist=, time=}, ... last 3 }, airborne=bool, open=bool }
+```
+Lua samples every CreateMove. A takeoff is the last sample on the ground (or in flight); flying
+logs no air phases. A phase still in the air when a new generation arrives lands in the new
+record. After a release the record stays `open` until he is settled (grounded or flying, or 3s).
+
 Python requires `v, ctl, active, gen, stopGen, held` (an empty `held` may arrive as `{}`).
 `ctl/gen/stopGen` describe the fence of the run that currently owns it. `held`
 is the set of buttons drive asserted on the last command. The rest feeds Slice 3. Python
@@ -315,6 +359,9 @@ sent a verb it would silently ignore.
   not `deferred`. The controller also retries. Duplicate stops are harmless; the relay may
   reject the older replayed seq.
 
+- **Feedback (Slice 3).** The bridge loop calls `DIRECT_CONTROL.observe(latest)`, which feeds
+  the controller and the frame-stamp history. The integration still owns `tick()` (≥ 4 Hz) and
+  the one-writer routing.
 - **Control seam (Slice 2).** With the controller built, set the module global
   `DIRECT_CONTROL = GModControl(controller, people=game_tasks.people)` (declare it `global`
   in `_run_bridge`). Only do this together with the one-writer routing above. Until every

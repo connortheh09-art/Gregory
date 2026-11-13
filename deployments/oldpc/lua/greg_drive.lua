@@ -8,12 +8,29 @@ local RX = { ctl = 0, floor = 0, stopGen = 0, gen = 0, shot = 0 } -- fence of th
 local H = nil                     -- the applied hold, nil when released
 local held, lastEnd, reject = {}, "none", nil
 local noclip = { state = "idle", gen = 0 }
+local motion, prevMotion = nil, nil -- per-generation motion log (Slice 3), in game units
 local atan2 = math.atan2 or math.atan -- LuaJIT/5.1 and 5.3+
 
 local function finite(x) return type(x) == "number" and x == x and math.abs(x) < math.huge end
 local function isGen(v) return finite(v) and v >= 1 and v < 2 ^ 53 and math.floor(v) == v end
 local function clamp(x, a, b) return math.max(a, math.min(b, x)) end
 local function num(v, lo, hi, default) if finite(v) then return clamp(v, lo, hi) end return default end
+local function planar(p, q) return math.sqrt((p.x - q.x) ^ 2 + (p.y - q.y) ^ 2) end
+local function r1(x) return math.floor(x * 10 + .5) / 10 end
+
+-- One record per accepted generation. A jump still in the air carries over to the next one,
+-- so its landing is not lost to a mid-move change.
+local function beginMotion(g, now, lp)
+    if not (lp and IsValid(lp)) then return end
+    local carry = nil
+    if motion then
+        motion.open, carry, motion.takeoff = false, motion.takeoff, nil
+        prevMotion = motion
+    end
+    local pos = lp:GetPos()
+    motion = { gen = g, ctl = RX.ctl, t0 = now, t = 0, start = pos, last = pos, path = 0, peak = 0, low = 0,
+               ground = lp:OnGround(), air = {}, phases = 0, drop = 0, open = true, takeoff = carry }
+end
 
 local function parse(a)
     local m = type(a.move) == "table" and a.move or {}
@@ -88,6 +105,7 @@ local function receive(a, now, lp)
         H.tapDue = p.jump == "tap" and now + .5 or nil
         H.jump = p.jump == "tap" and "pending" or "none"
         H.missing = nil
+        beginMotion(g, now, lp)
         if p.mode and lp and IsValid(lp) then
             local current = lp:GetMoveType() == MOVETYPE_NOCLIP and "noclip" or "walk"
             if p.mode ~= current then
@@ -217,6 +235,45 @@ function M.step(cmd, lp, now, dt)
     return true
 end
 
+-- Motion log: call every CreateMove. Air phases are judged from the ground state; logging
+-- continues after a release until he is settled (grounded, flying, or 3s), then the record is final.
+function M.sample(lp, now)
+    local m = motion
+    if not m or not m.open or not IsValid(lp) then return end
+    local pos, ground = lp:GetPos(), lp:OnGround()
+    local flying = lp:GetMoveType() == MOVETYPE_NOCLIP
+    local before = m.last
+    m.path, m.last, m.t = m.path + planar(pos, before), pos, now - m.t0
+    local dz = pos.z - m.start.z
+    m.peak, m.low = math.max(m.peak, dz), math.min(m.low, dz)
+    local k = m.takeoff
+    if flying then
+        m.takeoff = nil
+    elseif not ground then
+        if not k then m.takeoff = { pos = before, t = now, top = math.max(pos.z, before.z) } -- last point on ground or in flight
+        else k.top = math.max(k.top, pos.z) end
+    elseif k then -- landed: up = peak above takeoff, land = landing height vs takeoff (+ = higher)
+        local j = { up = k.top - k.pos.z, land = pos.z - k.pos.z, dist = planar(pos, k.pos), time = now - k.t }
+        m.phases, m.drop, m.takeoff = m.phases + 1, math.max(m.drop, -j.land), nil
+        if #m.air >= 3 then table.remove(m.air, 1) end
+        m.air[#m.air + 1] = j
+    end
+    m.ground = ground
+    if not H or H.gen ~= m.gen then
+        m.ended = m.ended or now
+        if ((ground or flying) and not m.takeoff) or now - m.ended > 3 then m.open = false end
+    end
+end
+
+local function motionBlock(m)
+    if not m then return nil end
+    local air = {}
+    for i, j in ipairs(m.air) do air[i] = { up = r1(j.up), land = r1(j.land), dist = r1(j.dist), time = r1(j.time) } end
+    return { gen = m.gen, ctl = m.ctl, t = r1(m.t), moved = r1(planar(m.last, m.start)), path = r1(m.path),
+             dz = r1(m.last.z - m.start.z), peak = r1(m.peak), low = r1(m.low), air = air, phases = m.phases,
+             drop = r1(m.drop), airborne = m.takeoff ~= nil, open = m.open }
+end
+
 -- Noclip outcome: the observed move type is the truth (the game may deny the toggle).
 function M.watch(lp, now)
     if noclip.state ~= "pending" or not IsValid(lp) then return end
@@ -241,7 +298,7 @@ function M.telemetry(lp, now)
              lease = H and math.max(0, H.expires - now) or 0, speed = vel:Length2D(), vspeed = vel.z,
              mode = mode(lp), blocked = H and H.blocked or false, jump = H and H.jump or "none",
              noclip = { want = noclip.want, state = noclip.state, gen = noclip.gen },
-             reject = reject, lastEnd = lastEnd }
+             reject = reject, lastEnd = lastEnd, motion = motionBlock(motion), prevMotion = motionBlock(prevMotion) }
 end
 
 M.VERSION = VERSION

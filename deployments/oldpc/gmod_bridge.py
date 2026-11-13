@@ -1702,6 +1702,8 @@ def _run_bridge(a, ap, capture_gate=None):
                 from greg_game_tasks import GameScreen
                 from greg_vision_helper import capture_game
                 game_screen=GameScreen(capture_game,seconds=a.supervised_seconds)
+                # Stamp inspected frames with movement since capture (inert until DIRECT_CONTROL).
+                game_screen.buffer.annotator=lambda captured_at: DIRECT_CONTROL.since(captured_at) if DIRECT_CONTROL is not None else None
             core = Core(a.core_root, provider=LMStudioProvider(a.lm, model, temperature=a.speech_temperature),
                 screen_source=game_screen.buffer if game_screen else None,
                 inbox_config=inbox_config,
@@ -1953,6 +1955,7 @@ def _run_bridge(a, ap, capture_gate=None):
                 previous_context = context
             was_actionable = valid
             if game_tasks is not None:game_tasks.update(PLAYERCORE,latest,now)
+            if DIRECT_CONTROL is not None and latest:DIRECT_CONTROL.observe(latest)
             if game_authority is not None and latest:
                 game_authority.observe(latest,CATALOG.observations(latest),PLAYERCORE.memory.recent_events(latest.get('map',''),4))
                 game_authority.offer(latest,CATALOG,PLAYERCORE.memory.landmarks(latest.get('map','')),
