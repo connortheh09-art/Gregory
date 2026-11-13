@@ -257,5 +257,58 @@ class Bridge(Base):
         self.assertIn('if valid and mode == "chat" and (DIRECT_CONTROL is None or DIRECT_CONTROL.allows({"action": "wait"})):', SOURCE)
 
 
+class Integration(Base):
+    """Flag-gated construction (--core-direct-control): one controller per bridge run."""
+    def construct(self, run_id):
+        node = next(n for n in ast.walk(TREE) if isinstance(n, ast.If)
+                    and ast.unparse(n.test) == "getattr(a, 'core_direct_control', False)"
+                    and 'DirectController' in ast.unparse(n))
+        # The block declares `nonlocal seq`, so run it inside a function like _run_bridge.
+        harness = ast.parse('def harness(a, write_cmd, cmd_path, latest, session, game_tasks, log):\n'
+                            '    seq = 0\n    DIRECT_CONTROL = None\n')
+        fn = harness.body[0]
+        fn.body += [node, ast.parse('return DIRECT_CONTROL, next_seq').body[0]]
+        scope = run(ast.fix_missing_locations(harness))
+        written, logs = [], []
+
+        def write_cmd(path, seq, action, state, session, mode, observer=None):
+            written.append((seq, action, mode))
+            observer(action, write_result='written')
+            return True
+        surface, next_seq = scope['harness'](SimpleNamespace(core_direct_control=True, controller_run=run_id), write_cmd,
+                                            'cmd.json', self.state, 's', self.link, logs.append)
+        return surface, next_seq, written, logs
+
+    def test_construction_shares_the_writer_and_seq_counter(self):
+        surface, next_seq, written, logs = self.construct(41)
+        self.assertEqual(logs, ['CORE_DIRECT_CONTROL {"run": 41}'])
+        self.assertIs(surface.people.__self__, self.link)
+        surface.observe(self.state)
+        surface.apply(drive(), self.native, self.state)
+        self.assertEqual([(s, a['action'], a['ctl'], m) for s, a, m in written], [(1, 'drive', 41, 'direct')])
+        self.assertEqual(next_seq(), 2)  # the bridge's own writes continue the same sequence
+
+    def test_without_a_run_id_it_fails_closed(self):
+        surface, _, written, _ = self.construct(None)
+        surface.observe(self.state)
+        self.assertIsNone(surface.offer(self.state))
+        with self.assertRaisesRegex(ValueError, 'no_controller_run'):
+            surface.apply(drive(), self.native, self.state)
+        self.assertEqual(written, [])
+
+    def test_run_id_is_reserved_under_the_writer_lock_and_shutdown_disconnects_first(self):
+        lock = next(n for n in ast.walk(TREE) if isinstance(n, ast.With)
+                    and 'command_writer_lock' in ast.unparse(n.items[0].context_expr))
+        body = ast.unparse(lock)
+        self.assertLess(body.index('reserve_run('), body.index('_run_bridge('))
+        self.assertIn("initialize=getattr(a, 'core_direct_control_init', False)", body)
+        run_bridge = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == '_run_bridge')
+        final = ast.unparse(next(n for n in ast.walk(run_bridge) if isinstance(n, ast.Try) and n.finalbody
+                                 and 'shutdown_bridge' in ast.unparse(n.finalbody)).finalbody)
+        self.assertLess(final.index("disconnect('bridge_shutdown')"), final.index('shutdown_bridge('))
+        self.assertIn('DIRECT_CONTROL', ast.unparse(run_bridge.body[0]))  # declared global
+        self.assertIn("ap.error('--core-direct-control requires --supervised-session and --core-game-tasks')", SOURCE)
+
+
 if __name__ == '__main__':
     unittest.main()

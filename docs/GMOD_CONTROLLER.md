@@ -221,6 +221,27 @@ direct action doesn't throw a task away.
 - **Stop with nothing held** publishes nothing (`noop`, verdict `unchanged`). A fenced `wait`
   would cancel a running task's Lua route, and a stop never ends a task.
 
+### Turning it on (patch 0009, opt-in)
+
+`--core-direct-control` (requires `--supervised-session` and `--core-game-tasks`) builds one
+`GModControl` per bridge run:
+- **Run id.** `main()` reserves the run id with `reserve_run(greg/controller_run.json)` inside
+  the `cmd.writer.lock` block, before `_run_bridge` can publish anything. A missing counter
+  is an error unless the operator passes `--core-direct-control-init`. On any failure the
+  bridge starts with `run_id=None`: the controller refuses holds (`no_controller_run`), so
+  control is never offered.
+- **Writer.** The controller publishes through `bridge_publisher` over the bridge's own
+  `write_cmd` (the TickWriter wrapper in supervised sessions) and shares its `seq` counter
+  (`next_seq`). The recorder observer is chained.
+- **Shutdown.** The `finally` block disconnects (`bridge_shutdown`, a fenced release) before
+  `shutdown_bridge` writes its legacy stop.
+- **Lua.** Install `greg_drive.lua` and set `greg_direct 1`. Without the capability Python
+  never offers control.
+
+Not covered yet: Windows durability of the counter file, and a live check that TickWriter's
+0.35s spacing leaves renewals enough room when speech is busy (renewals defer, then go out on
+the next free tick; the 1.5s lease covers about four missed renewals).
+
 ## Wire contract
 
 Hold, envelope `mode: "direct"`:
@@ -388,8 +409,8 @@ sent a verb it would silently ignore.
 
 - **Owner loop (Slices 3–4).** Each pass: `DIRECT_CONTROL.observe(latest)` (controller
   evidence plus frame-stamp history), `DIRECT_CONTROL.tick()` (the loop sleeps 0.1s, so about
-  10 Hz), then `settle()` → `game_tasks.resume(now)`. Still for the integration: constructing
-  the controller and the remaining stop paths (shutdown → `disconnect`).
+  10 Hz), then `settle()` → `game_tasks.resume(now)`. Construction and shutdown are
+  in patch 0009 (below).
 - **Control seam (Slice 2).** With the controller built, set the module global
   `DIRECT_CONTROL = GModControl(controller, people=game_tasks.people)` (declare it `global`
   in `_run_bridge`). Only do this together with the one-writer routing above. Until every
