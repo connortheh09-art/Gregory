@@ -79,10 +79,11 @@ CONTROL_HINT=('DIRECT CONTROL (your own body): {"action":"control","command":"dr
     'move is relative to your facing. look P#/D# keeps facing that person/place (with forward you walk there and stop near it); '
     'turn_*, up/down/level turn once. jump tap|hold, crouch, use (press once), fly on|off, vertical up|down while flying. '
     'Lasts seconds (1-30); a new control replaces it; {"action":"control","command":"stop"} stops it (tasks continue; game_task cancel ends one). '
-    'A drive ends any game task; tasks suit long trips. control.result is what the game observed (landed_m>0: landed higher). ')
+    'A drive pauses your task until it ends (task:"end" drops it); tasks suit long trips. control.result is what the game observed (landed_m>0: landed higher). ')
 
-def control_intents(control,players=(),destinations=()):
-    """Drive/stop branches when the adapter offers control; look targets are this turn's labels."""
+def control_intents(control,players=(),destinations=(),task=False):
+    """Drive/stop branches when the adapter offers control; look targets are this turn's labels.
+    With an active task a drive may say what happens to it: pause (default, it resumes after) or end."""
     if not isinstance(control,dict):return []
     limit=control.get('max_seconds')
     limit=limit if type(limit) is int and 1<=limit<=30 else 30
@@ -91,6 +92,7 @@ def control_intents(control,players=(),destinations=()):
                crouch=dict(type='boolean'),use=dict(type='boolean'))
     fly=[v for v in ('on','off') if v in (control.get('fly') or ())]
     if fly:props.update(fly=enum(fly),vertical=enum(['up','down']))
+    if task:props['task']=enum(['pause','end'])
     props['seconds']=dict(type='integer',minimum=1,maximum=limit)
     return [obj(props,['action','command','move','seconds']),obj(dict(action=enum(['control']),command=enum(['stop'])))]
 
@@ -149,7 +151,7 @@ class TurnChoices:
                 if internal or kind=='settle':required.append('task_id')
             if kind=='settle' and not self.task_id:continue
             choices.append(obj(props,required))
-        if not internal:choices.extend(activity_intents(offered)+control_intents(offered.get('control'),players,shown))
+        if not internal:choices.extend(activity_intents(offered)+control_intents(offered.get('control'),players,shown,bool(self.task_id)))
         if screen:choices.append(obj(dict(action=enum(['inspect_screen']))))
         if listen:choices.append(obj(dict(action=enum(['voice_turn']),kind=enum(['listen']))))
         return envelope(choices,memory_ids)

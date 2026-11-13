@@ -1131,12 +1131,13 @@ def actionable(state: dict | None, now: float) -> bool:
                 and isinstance(state.get("controlEpoch"), (int, float)))
 
 
-def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log) -> dict:
+def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log, now: float = 0.) -> dict:
     """Core's direct-control decision, applied once at publication (docs/GMOD_CONTROLLER.md).
 
-    The latest decision wins: an accepted drive ends the current game task. A stop ends direct
-    control only; ending a task stays the deliberate task `cancel`. A refusal changes nothing,
-    replaces the spoken claim and is not a task refusal (no recovery turns).
+    The latest decision wins. A drive pauses the current game task until direct control ends,
+    or ends it with task:"end". A stop ends direct control only; ending a task stays the
+    deliberate task `cancel`. A refusal changes nothing, replaces the spoken claim and is not
+    a task refusal (no recovery turns).
     """
     intent = row['game_intent']
     command = str(intent.get('command', ''))[:16]
@@ -1155,11 +1156,17 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
         log('CORE_CONTROL_REFUSED ' + json.dumps(dict(command=command, reason=reason)))
         return dict(row, say="I couldn't stop just now." if command == 'stop' else "I can't move like that right now.",
                     task_outcome=dict(verdict='refused', kind='control_' + command, reason=reason))
+    if detail.get('noop'):
+        log('CORE_CONTROL ' + json.dumps(dict(command=command, noop=True)))
+        return dict(row, task_outcome=dict(verdict='unchanged', kind='control_' + command, reason='nothing_to_stop'))
     if command == 'drive':
-        if game_tasks is not None:
+        if game_tasks is not None and intent.get('task') == 'end':
             game_tasks.invalidate()
+            detail['task'] = 'ended'
+        elif game_tasks is not None and game_tasks.pause(now):
+            detail['task'] = 'paused'  # resumes when direct control settles (bridge loop)
         if runtime is not None:
-            runtime.end_goal('abandoned', 'core_direct_control')
+            runtime.end_goal('abandoned', 'core_direct_control')  # drops the route; resume re-plans
     if authority is not None:
         authority.note(latest, 'control', command=command, generation=detail['generation'],
                        qualification='requested_not_confirmed')
@@ -1780,6 +1787,7 @@ def _run_bridge(a, ap, capture_gate=None):
                     if voice_session is not None:
                         voice_session.begin_drain()
                     log('SUPERVISED_DRAIN_START ' + json.dumps(dict(grace_seconds=35)))
+                    if DIRECT_CONTROL is not None:DIRECT_CONTROL.controller.stop('supervised_drain')
                     if latest:
                         seq += 1
                         write_cmd(cmd_path, seq, {'action':'wait'}, latest, session, 'stop')
@@ -1837,7 +1845,7 @@ def _run_bridge(a, ap, capture_gate=None):
                         log("STUCK: turn " + str(turn) + " then commit forward")
                         ready = None
                         seq += 1
-                        write_cmd(cmd_path, seq, {"action": "look", "yaw": (number(((latest or {}).get("ang") or {}).get("y"), 0) + turn) % 360, "pitch": 0}, latest, session, mode)
+                        if DIRECT_CONTROL is None or DIRECT_CONTROL.allows({"action": "look"}):write_cmd(cmd_path, seq, {"action": "look", "yaw": (number(((latest or {}).get("ang") or {}).get("y"), 0) + turn) % 360, "pitch": 0}, latest, session, mode)
                         intent.commit_until = now + 4.0
                         command_due = now + 0.55
             for ln in chat_tail.read_new():
@@ -1948,14 +1956,22 @@ def _run_bridge(a, ap, capture_gate=None):
                 pending_say = None
                 command_due = 0
                 # Changing into chat preempts a currently held free-roam action.
-                if valid and mode == "chat":
+                if valid and mode == "chat" and (DIRECT_CONTROL is None or DIRECT_CONTROL.allows({"action": "wait"})):
                     seq += 1
                     write_cmd(cmd_path, seq, {"action": "wait"}, latest, session, "stop" if a.supervised_session else mode)
                     command_due = now + 0.35  # let Lua observe cancellation before look/move
                 previous_context = context
             was_actionable = valid
             if game_tasks is not None:game_tasks.update(PLAYERCORE,latest,now)
-            if DIRECT_CONTROL is not None and latest:DIRECT_CONTROL.observe(latest)
+            if DIRECT_CONTROL is not None:
+                # Owner loop (Slice 4): evidence, heartbeat, then resume a paused task once direct
+                # control has settled.
+                if latest:DIRECT_CONTROL.observe(latest)
+                DIRECT_CONTROL.tick()
+                ended=DIRECT_CONTROL.settle()
+                if ended is not None:
+                    resumed=bool(game_tasks is not None and game_tasks.resume(now))
+                    log('CORE_CONTROL_ENDED '+json.dumps(dict(reason=ended,task_resumed=resumed)))
             if game_authority is not None and latest:
                 game_authority.observe(latest,CATALOG.observations(latest),PLAYERCORE.memory.recent_events(latest.get('map',''),4))
                 game_authority.offer(latest,CATALOG,PLAYERCORE.memory.landmarks(latest.get('map','')),
@@ -2134,7 +2150,7 @@ def _run_bridge(a, ap, capture_gate=None):
                         current=bool((row['request'].get('voice_metadata') or row['request'].get('game_attention')) and voice_session is not None
                                 and stamp==voice_session.stamp())
                         if current and row['game_intent'].get('action')=='control':
-                            row=apply_control(row,latest,DIRECT_CONTROL,game_tasks,PLAYERCORE,game_authority,log)
+                            row=apply_control(row,latest,DIRECT_CONTROL,game_tasks,PLAYERCORE,game_authority,log,now)
                             if row['task_outcome']['verdict']=='accepted':
                                 tracker.decision_result(trace,accepted=True,reason='core_conversation_control',
                                     parsed_summary=dict(kind=row['task_outcome']['kind']),activate=False)
@@ -2248,6 +2264,8 @@ def _run_bridge(a, ap, capture_gate=None):
                     if mode != "chat":
                         if chosen_voice_activity:
                             if action.get('action')=='goal':action=PLAYERCORE.autonomous(action,latest,now,intent)
+                        elif DIRECT_CONTROL is not None and DIRECT_CONTROL.holding():
+                            action=None  # direct control owns the body: no route or autonomous plan
                         elif game_tasks is not None and game_tasks.engaged:
                             action=game_tasks.tick(PLAYERCORE,latest,now)
                         else:
@@ -2323,12 +2341,21 @@ def _run_bridge(a, ap, capture_gate=None):
                     # Spawn/speech/wait dispatch can close this real decision synchronously.
                     # Pin its fresh observation first; never append to a closed experience.
                     tracker.observe_landmark()
-                seq += 1
-                published = write_cmd(cmd_path, seq, action, latest, session, mode)
-                if game_authority is not None:game_authority.action(latest,action,published,seq)
-                if published is True:
-                    MEMORY.open(action, latest, now, action.get("duration", interval), seq)
-                log(f"#{seq} {mode} goal={goal!r} -> {json.dumps(action)}")
+                held_back = False
+                if DIRECT_CONTROL is not None and not DIRECT_CONTROL.allows(action):
+                    # A legacy wait/move would release his hold in Lua: send only its speech.
+                    speech=action.get('speech')
+                    if isinstance(speech,dict) and isinstance(speech.get('text'),str):
+                        action={'action':'say','text':speech['text']}
+                    else:
+                        held_back = True
+                if not held_back:
+                    seq += 1
+                    published = write_cmd(cmd_path, seq, action, latest, session, mode)
+                    if game_authority is not None:game_authority.action(latest,action,published,seq)
+                    if published is True:
+                        MEMORY.open(action, latest, now, action.get("duration", interval), seq)
+                    log(f"#{seq} {mode} goal={goal!r} -> {json.dumps(action)}")
                 if tracker is not None: tracker.scope_trace = None
                 ready_trace = None
                 command_due = now + (0.35 if social_sent else (action.get("duration", interval) if action["action"] == "move" else interval))

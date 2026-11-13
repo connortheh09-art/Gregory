@@ -1,4 +1,4 @@
-# gmod_controller: Slice 1 (stop/release core), Slice 2 (Core's control decision), Slice 3 (what the game observed) and the Lua drive/noclip spec
+# gmod_controller: Slices 1–4 (stop/release core, Core's control decision, what the game observed, one body for direct control and tasks) and the Lua drive/noclip spec
 
 Status: revised candidate (R3) after Gordon's reviews. Those reviews found that fences and
 evidence were not scoped to a controller run or actor (R1–R3), and that run ids from the wall
@@ -194,6 +194,33 @@ Everything here comes from game telemetry; a missing fact is left out, never gue
 - **Budget.** Evicted last, in this order: player bearings, then `control.result`, then the control
   offer itself.
 
+## Slice 4: one body, two planners
+
+Direct control and game tasks take turns with his body. The latest decision wins, and a short
+direct action doesn't throw a task away.
+
+- **A drive pauses the current task** (`GameTasks.pause`). A paused task stays his task
+  (`engaged`, so autonomous play stays out). Its tick plans nothing, but a world change still
+  ends it. The model sees `current_task.paused: true`. With `task: "end"` (offered only while a
+  task is active) the drive drops the task instead, as in Slice 2. PlayerCore's route is dropped
+  either way, so a resumed task plans a fresh route from wherever he ended up.
+- **Resumption.** `GModControl.settle()`, once per owner-loop pass, reports when direct control
+  has ended (any reason) and lets route helpers write again (`allow_tasks`). The bridge then calls
+  `GameTasks.resume(now)`: the task continues with the time it had left. Its deadline, stay and
+  review clocks are shifted by the pause. Replanning or replacing a paused task resumes it first;
+  `continue` keeps it paused.
+- **When control has ended.** `holding()` is true while an intent is active and until the game
+  settles its release (acknowledged, observed clear, superseded, or retries given up after 3s).
+  So a resumed route can't race the fenced stop in the mailbox.
+- **Arbitration gate.** While `holding()`, the bridge plans no route or autonomous step, and
+  `allows(action)` refuses every write that bypasses the controller if it would move him or
+  release his hold in Lua. That covers `MOVEMENT`, which now includes `use` and `select`,
+  because Lua's `releaseKey` runs for them. A held-back action's speech still goes out as a
+  `say`. The gated sites are the main action write, the legacy STUCK look and the chat-mode
+  wait. The supervised drain also stops direct control (`supervised_drain`).
+- **Stop with nothing held** publishes nothing (`noop`, verdict `unchanged`). A fenced `wait`
+  would cancel a running task's Lua route, and a stop never ends a task.
+
 ## Wire contract
 
 Hold, envelope `mode: "direct"`:
@@ -359,9 +386,10 @@ sent a verb it would silently ignore.
   not `deferred`. The controller also retries. Duplicate stops are harmless; the relay may
   reject the older replayed seq.
 
-- **Feedback (Slice 3).** The bridge loop calls `DIRECT_CONTROL.observe(latest)`, which feeds
-  the controller and the frame-stamp history. The integration still owns `tick()` (≥ 4 Hz) and
-  the one-writer routing.
+- **Owner loop (Slices 3–4).** Each pass: `DIRECT_CONTROL.observe(latest)` (controller
+  evidence plus frame-stamp history), `DIRECT_CONTROL.tick()` (the loop sleeps 0.1s, so about
+  10 Hz), then `settle()` → `game_tasks.resume(now)`. Still for the integration: constructing
+  the controller and the remaining stop paths (shutdown → `disconnect`).
 - **Control seam (Slice 2).** With the controller built, set the module global
   `DIRECT_CONTROL = GModControl(controller, people=game_tasks.people)` (declare it `global`
   in `_run_bridge`). Only do this together with the one-writer routing above. Until every
@@ -375,8 +403,9 @@ sent a verb it would silently ignore.
    timeout 3s, telemetry timeout 3s, ramps ±600/900 u/s².
 2. `greg_direct` default.
 3. Stop keeps noclip, or exits it.
-4. After a stop, tasks stay blocked until Core calls `allow_tasks()` (Slice 4 decides
-   resumption).
+4. Resolved (Slice 4): `GModControl.settle()` calls `allow_tasks()` once direct control has
+   settled, whatever ended it, and a paused task resumes. Autonomous play (no task) resumes the
+   same way; whether a drive should also pause the agenda is open.
 5. Default `speed` 0.5 when a decision gives none. Slice 2 names gaits: sneak/walk/jog/run
    = .25/.5/.75/1.0.
 6. Control on internal (game-attention) turns: off for now.

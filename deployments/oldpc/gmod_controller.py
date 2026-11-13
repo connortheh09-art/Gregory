@@ -24,8 +24,9 @@ MODES = ('walk', 'noclip')
 FIELDS = frozenset(('forward', 'right', 'up', 'speed', 'yaw', 'pitch', 'turn_rate', 'jump', 'crouch', 'mode',
                     'look_steamid', 'look_point', 'look_near', 'use'))
 STEAMID = re.compile(r'STEAM_[0-5]:[01]:[0-9]+')
-# Legacy verbs that move, steer or release. Only the controller may send them.
-MOVEMENT = frozenset(('drive', 'move', 'navigate', 'key', 'look', 'gaze', 'wait'))
+# Legacy verbs that move, steer or release (in Lua, use/select also release held inputs).
+# Only the controller may send them while direct control holds the body.
+MOVEMENT = frozenset(('drive', 'move', 'navigate', 'key', 'look', 'gaze', 'wait', 'use', 'select'))
 IDENTITY = ('steamid', 'bridgeSession', 'controlEpoch', 'map')
 
 
@@ -248,7 +249,7 @@ TURNS = {'turn_left': 90., 'turn_right': -90., 'turn_around': 180., 'slight_left
 TILTS = {'up': -45., 'down': 45., 'level': 0.}  # Source pitch: negative looks up
 NEAR = {'player': 80., 'destination': 40.}     # stand-off: walk up to a target, not into it
 CONTROL_FIELDS = frozenset(('action', 'command', 'move', 'pace', 'look', 'jump', 'crouch', 'use', 'fly',
-                            'vertical', 'seconds'))
+                            'vertical', 'seconds', 'task'))  # task: Core's (pause/end), not an input
 
 
 def _world(state):
@@ -341,6 +342,8 @@ def translate(intent, view, state, player=lambda alias, state: None):
     move, speed = MOVES.get(intent.get('move')), PACES.get(intent.get('pace', 'walk'))
     if move is None or speed is None:
         raise ValueError('unknown move or pace')
+    if intent.get('task', 'pause') not in ('pause', 'end'):
+        raise ValueError('task must be pause or end')
     seconds = intent.get('seconds')
     if type(seconds) is not int or not 1 <= seconds <= 30:
         raise ValueError('seconds must be a whole number from 1 to 30')
@@ -391,12 +394,17 @@ class GModControl:
     yield_to_task() hands the body back when Core picks a task or activity. The model's
     latest decision wins either way. people(state) -> [(view row with 'id', SteamID)], as
     GameTasks.people, resolves player look targets against the live state.
+
+    Owner loop (Slice 4): observe(state) per sample, tick() at >= 4 Hz, settle() once per pass
+    (it reports when direct control ended, so a paused task resumes), and allows(action)
+    before any write that does not go through the controller.
     """
 
     def __init__(self, controller, people=lambda state: ()):
         self.controller, self.people = controller, people
         self.track = deque(maxlen=16)  # (arrival time, actor+world, seq, position): about 8s of samples
         self.admitted = None  # the last sample the controller accepted (fresh, in order)
+        self._settled = controller.generation  # last generation settle() has accounted for
 
     def offer(self, state):
         """What the model may choose now; None when a decision would be refused anyway."""
@@ -425,8 +433,12 @@ class GModControl:
             raise ValueError('control intent required')
         ignored = []
         if intent.get('command') == 'stop' and set(intent) == {'action', 'command'}:
+            if not self.holding():
+                # Nothing of his to stop. A stop never ends a task (Connor, 2026-11-12), and a
+                # release would also cancel the task's running route in Lua.
+                return dict(generation=self.controller.generation, transport='', ignored=[], noop=True)
             receipt = self.controller.stop('model_stop')  # stop always wins: no staleness check
-            self.controller.allow_tasks()  # it ends direct control, not a task (Connor, 2026-11-12)
+            self.controller.allow_tasks()
         else:
             if tuple((view or {}).get('binding', ())) != _world(state):
                 raise ValueError('stale control decision')
@@ -467,6 +479,34 @@ class GModControl:
         at = [b + (a - b) * w for a, b in zip(after[3], before[3])]
         now = rows[-1][3]
         return dict(moved_m_since=_metres(math.dist(at[:2], now[:2])), rise_m_since=_metres(now[2] - at[2]))
+
+    def holding(self):
+        """Direct control owns the body: an intent, or a release the game has not settled
+        (acknowledged, observed clear, superseded or given up)."""
+        status = self.controller.status()
+        if status['intent'] is not None:
+            return True
+        r = status['release']
+        return bool(r) and not (r['acknowledged'] or r['released'] or r['superseded'] or r['unconfirmed'])
+
+    def allows(self, action):
+        """May a write that bypasses the controller go out now? Never movement or a release
+        while direct control holds the body; speech and the rest always may."""
+        return not (self.controller.adapter.is_movement(action) and self.holding())
+
+    def tick(self):
+        """Owner-loop heartbeat: renew, expire, or retry a release."""
+        self.controller.tick()
+
+    def settle(self):
+        """Once per owner-loop pass: the reason direct control has ended since the last call,
+        else None. From then on route helpers may write again, so a paused task can resume."""
+        status = self.controller.status()
+        if self.holding() or status['generation'] == self._settled:
+            return None
+        self._settled = status['generation']
+        self.controller.allow_tasks()
+        return (status['release'] or {}).get('reason') or 'ended'
 
     def yield_to_task(self):
         """Core chose a task or activity: end any direct hold and let route helpers write."""

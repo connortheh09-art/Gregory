@@ -244,7 +244,7 @@ class Frames(World):
         source = (ROOT / 'deployments/oldpc/gmod_bridge.py').read_text()
         self.assertIn('game_screen.buffer.annotator=lambda captured_at: DIRECT_CONTROL.since(captured_at) '
                       'if DIRECT_CONTROL is not None else None', source)
-        self.assertIn('if DIRECT_CONTROL is not None and latest:DIRECT_CONTROL.observe(latest)', source)
+        self.assertIn('if latest:DIRECT_CONTROL.observe(latest)', source)
 
 
 if __name__ == '__main__':
