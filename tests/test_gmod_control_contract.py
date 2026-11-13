@@ -347,13 +347,14 @@ class Publication(World):
                          dict(kind='control', command='drive', qualification='requested_not_confirmed'))
         self.assertEqual(box.actions()[-1]['action'], 'drive')
 
-    def test_accepted_stop_also_ends_the_task(self):
+    def test_stop_ends_direct_control_but_not_the_task(self):
         self.follow()
-        surface, _, box = self.surface()
+        task = dict(self.link.active)
+        surface, controller, box = self.surface()
         row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
-        self.assertEqual(row['task_outcome']['verdict'], 'accepted')
-        self.assertIsNone(self.link.active)
+        self.assertEqual((row['task_outcome']['verdict'], self.link.active, ended), ('accepted', task, []))
         self.assertEqual(box.actions()[-1]['action'], 'wait')
+        self.assertEqual(controller.publish_task({'action': 'navigate'}, 'route'), ('published', ''))
 
     def test_refused_control_changes_nothing_and_is_not_a_task_refusal(self):
         self.follow()

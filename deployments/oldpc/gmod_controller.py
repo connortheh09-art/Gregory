@@ -346,6 +346,7 @@ class GModControl:
         ignored = []
         if intent.get('command') == 'stop' and set(intent) == {'action', 'command'}:
             receipt = self.controller.stop('model_stop')  # stop always wins: no staleness check
+            self.controller.allow_tasks()  # it ends direct control, not a task (Connor, 2026-11-12)
         else:
             if tuple((view or {}).get('binding', ())) != _world(state):
                 raise ValueError('stale control decision')

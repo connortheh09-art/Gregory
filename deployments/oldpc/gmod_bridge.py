@@ -1134,8 +1134,9 @@ def actionable(state: dict | None, now: float) -> bool:
 def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log) -> dict:
     """Core's direct-control decision, applied once at publication (docs/GMOD_CONTROLLER.md).
 
-    The latest decision wins: an accepted drive or stop ends the current game task. A refusal
-    changes nothing, replaces the spoken claim and is not a task refusal (no recovery turns).
+    The latest decision wins: an accepted drive ends the current game task. A stop ends direct
+    control only; ending a task stays the deliberate task `cancel`. A refusal changes nothing,
+    replaces the spoken claim and is not a task refusal (no recovery turns).
     """
     intent = row['game_intent']
     command = str(intent.get('command', ''))[:16]
@@ -1154,10 +1155,11 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
         log('CORE_CONTROL_REFUSED ' + json.dumps(dict(command=command, reason=reason)))
         return dict(row, say="I couldn't stop just now." if command == 'stop' else "I can't move like that right now.",
                     task_outcome=dict(verdict='refused', kind='control_' + command, reason=reason))
-    if game_tasks is not None:
-        game_tasks.invalidate()
-    if runtime is not None:
-        runtime.end_goal('abandoned', 'core_direct_control')
+    if command == 'drive':
+        if game_tasks is not None:
+            game_tasks.invalidate()
+        if runtime is not None:
+            runtime.end_goal('abandoned', 'core_direct_control')
     if authority is not None:
         authority.note(latest, 'control', command=command, generation=detail['generation'],
                        qualification='requested_not_confirmed')
