@@ -82,6 +82,7 @@ function lp:GetRunSpeed() return 400 end
 function lp:GetWalkSpeed() return 200 end
 function lp:GetVelocity() return self.vel end
 function lp:GetShootPos() return self.pos + Vector(0, 0, 64) end
+function lp:GetPos() return self.pos end
 function lp:SetEyeAngles(a) self.eye = a end
 
 local function cmd()
@@ -251,6 +252,73 @@ do
     check(#console == 1 and console[1] == 'noclip', 'one toggle per generation')
     drive.watch(lp, 1.2)
     check(drive.telemetry(lp, 1.2).noclip.state == 'refused', 'unchanged move type means refused')
+end
+
+-- 9. Motion log (Slice 3): a jump onto a ledge is one air phase with its rise and landing height.
+local function at(drive, now, x, z, ground)
+    lp.pos, lp.ground = Vector(x, 0, z), ground
+    drive.sample(lp, now)
+end
+local function near(a, b) return type(a) == 'number' and math.abs(a - b) < .11 end
+do
+    local drive = load()
+    lp.pos, lp.ground, lp.mt = Vector(0, 0, 0), true, MOVETYPE_WALK
+    drive.receive(hold(1, { jump = 'tap' }), 0, lp)
+    at(drive, .05, 5, 0, true)
+    for i, z in ipairs({ 20, 40, 50, 45, 38 }) do at(drive, .05 + i * .05, 5 + i * 10, z, false) end
+    at(drive, .4, 60, 32, true)
+    at(drive, .5, 70, 32, true)
+    local m = drive.telemetry(lp, .5).motion
+    local j = m and m.air[1]
+    check(m and m.gen == 1 and m.ctl == 7 and m.phases == 1 and #m.air == 1, 'one air phase logged for gen 1')
+    check(j and near(j.up, 50) and near(j.land, 32) and near(j.dist, 55), 'rise 50, landed 32 higher, 55 forward')
+    check(near(m.dz, 32) and near(m.peak, 50) and near(m.moved, 70) and m.open, 'net motion while the hold lasts')
+end
+
+-- 10. Walking off a ledge is a drop; a stop leaves the record open until he has landed.
+do
+    local drive = load()
+    lp.pos, lp.ground = Vector(0, 0, 0), true
+    drive.receive(hold(1), 0, lp)
+    at(drive, .1, 10, 0, true)
+    drive.receive({ action = 'wait', ctl = 7, driveGen = 2, reason = 'model_stop' }, .15, lp)
+    at(drive, .2, 20, -40, false)
+    check(drive.telemetry(lp, .2).motion.open, 'still logging while falling after the stop')
+    at(drive, .6, 30, -200, true)
+    at(drive, .7, 90, -200, true)
+    local m = drive.telemetry(lp, .7).motion
+    check(not m.open and near(m.drop, 200) and near(m.air[1].up, 0) and near(m.moved, 30), 'drop logged, record final once landed')
+end
+
+-- 11. A jump still in the air when a new decision arrives lands in the new record.
+do
+    local drive = load()
+    lp.pos, lp.ground = Vector(0, 0, 0), true
+    drive.receive(hold(1), 0, lp)
+    at(drive, .1, 0, 0, true)
+    at(drive, .2, 10, 30, false)
+    drive.receive(hold(2, { move = { forward = 0, right = 1, up = 0, speed = .5 } }), .25, lp)
+    at(drive, .3, 20, 40, false)
+    at(drive, .5, 30, 0, true)
+    local t = drive.telemetry(lp, .5)
+    check(t.prevMotion.gen == 1 and not t.prevMotion.open and t.prevMotion.phases == 0, 'old record closed without the landing')
+    check(t.motion.gen == 2 and t.motion.phases == 1 and near(t.motion.air[1].up, 40), 'landing attributed to the new decision')
+end
+
+-- 12. Flying has no air phases.
+do
+    local drive = load()
+    lp.pos, lp.ground, lp.mt = Vector(0, 0, 0), false, MOVETYPE_NOCLIP
+    drive.receive(hold(1), 0, lp)
+    at(drive, .1, 0, 100, false)
+    at(drive, .2, 0, 0, false)
+    check(drive.telemetry(lp, .2).motion.phases == 0, 'noclip flight is not a jump')
+    at(drive, .3, 0, 100, false)
+    lp.mt = MOVETYPE_WALK -- noclip ends mid-air: the fall that follows is a drop from there
+    at(drive, .4, 0, 90, false)
+    at(drive, .8, 0, 0, true)
+    local j = drive.telemetry(lp, .8).motion.air[1]
+    check(j and near(j.up, 0) and near(j.land, -100), 'leaving noclip mid-air logs a drop, not a 100 u jump')
 end
 
 print(string.format('%d checks, %d failures', checks, failures))

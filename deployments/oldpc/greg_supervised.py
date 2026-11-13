@@ -823,7 +823,11 @@ def bounded_turn_prompt(prefix,question,live,evidence,dialogue,*,internal=False,
             view['current_task'].pop('feedback')
         elif view and 'version' in (view.get('current_task') or {}):view['current_task'].pop('version')
         elif view and 'id' in (view.get('last_refusal') or {}):view['last_refusal'].pop('id')
-        # Last resort before failing the turn: no control offer this turn rather than no turn.
+        # Last resorts before failing the turn: player bearings, then the control result, then
+        # no control offer this turn rather than no turn.
+        elif view and any('distance_m' in p or 'bearing_relative' in p for p in view.get('players',[])):
+            for p in view['players']:p.pop('distance_m',None);p.pop('bearing_relative',None)
+        elif ((live.get('activity_options') or {}).get('control') or {}).get('result'):live['activity_options']['control'].pop('result')
         elif (live.get('activity_options') or {}).get('control'):live['activity_options'].pop('control')
         else:break
         essential=render()
@@ -860,6 +864,7 @@ class CoreGameAuthority:
         self.world=None;self.events=deque(maxlen=8);self.last_action=None;self.last_feedback=None
         self.dialogue=lambda:[]
         self.options={};self.options_at=-float('inf');self.last_choice=None
+        self.control=None
     def think(self,payload,*,background=False):
         queued=time.monotonic()
         with self.gate:
@@ -886,7 +891,7 @@ class CoreGameAuthority:
         world=tuple(state.get(k) for k in ('map','bridgeSession','controlEpoch'))
         if world!=self.world:
             self.world_started=self.started if self.world is None else time.time()
-            self.world=world;self.events.clear();self.last_action=None;self.last_feedback=None;self.observations={};self.last_spawn=None;self.options={};self.options_at=-float('inf');self.last_choice=None
+            self.world=world;self.events.clear();self.last_action=None;self.last_feedback=None;self.observations={};self.last_spawn=None;self.options={};self.options_at=-float('inf');self.last_choice=None;self.control=None
         return world
     def note(self,state,kind,**fields):
         with self.lock:
@@ -926,16 +931,19 @@ class CoreGameAuthority:
         with self.lock:
             if tuple(state.get(k) for k in ('map','bridgeSession','controlEpoch'))!=self.world:return {}
             # Compact, complete records; no raw image, private inbox or full nav route.
-            return dict(recent=list(self.events)[-2:],last_spawn_request=getattr(self,'last_spawn',None),server_observations=getattr(self,'observations',{}),activity_options=self.options)
+            return dict(recent=list(self.events)[-2:],last_spawn_request=getattr(self,'last_spawn',None),server_observations=getattr(self,'observations',{}),
+                activity_options=dict(self.options,control=json.loads(json.dumps(self.control))) if self.control else self.options)
     def offer(self,state,catalog,landmarks,navigation_available,now,control=None):
+        # Direct control (gmod_controller.GModControl.offer) changes every tick: results, seconds
+        # left. It is never rate limited; absent = not offered.
+        with self.lock:
+            self.control=json.loads(json.dumps(control)) if isinstance(control,dict) else None
         if now-self.options_at<3:return
         choices=[dict(id=e['id'],name=str(e.get('name',''))[:40]) for e in catalog.choices(state)[:2]]
         spots=[dict(name=str(e['name'])[:100]) for e in list(landmarks)[:2]]
         with self.lock:
             self.options_at=now
             self.options=dict(binding=list(self.world),spawn_choices=choices,landmarks=spots,navigation_available=bool(navigation_available))
-            # Direct control offer from the adapter (gmod_controller.GModControl.offer); absent = not offered.
-            if isinstance(control,dict):self.options['control']=json.loads(json.dumps(control))
     def validate_activity(self,proposal,offered,state):
         if tuple(offered.get('binding',()))!=tuple(state.get(k) for k in ('map','bridgeSession','controlEpoch')):
             raise ValueError('stale activity decision')

@@ -33,6 +33,9 @@ class ScreenBuffer:
         self.enabled=True
         self.frames=deque()
         self.lock=threading.Lock()
+        # Optional game adapter hook: captured_at -> small dict of game facts for that moment
+        # (e.g. how far he has moved since). Called outside the lock; failures are ignored.
+        self.annotator=None
 
     def publish(self, image, captured_at, started, *, session=None):
         """Trusted local capture adapter supplies a PIL image and local clock stamps."""
@@ -86,6 +89,10 @@ class ScreenBuffer:
             label=datetime.fromtimestamp(meta['captured_at'],timezone(timedelta(hours=-5),'EST')).strftime('%Y-%m-%d_%H-%M-%S-%f_EST')
             meta=dict(meta,status='ready',age_seconds=round(now-started,3),
                       display_name=label+'_'+self.game+'_'+meta['frame_id']+'.jpg')
+        if self.annotator is not None:
+            try:note=self.annotator(meta['captured_at'])
+            except Exception:note=None
+            if isinstance(note,dict) and note and len(json.dumps(note))<=200:meta['game_facts']=note
         # Copy bytes before eviction; an in-flight inference never refers to a deleted path.
         return 'data:image/jpeg;base64,'+base64.b64encode(data).decode('ascii'),meta
 

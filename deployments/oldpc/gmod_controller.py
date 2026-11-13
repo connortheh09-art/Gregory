@@ -13,6 +13,7 @@ import math
 import os
 import re
 import time
+from collections import deque
 from pathlib import Path
 
 from greg_controller_core import AMBIGUOUS, DEFERRED, FAILED, PUBLISHED, REFUSED, Feedback
@@ -254,6 +255,74 @@ def _world(state):
     return tuple(state.get(k) for k in ('map', 'bridgeSession', 'controlEpoch'))
 
 
+# -- Slice 3: what the game observed, in model terms -------------------------------------
+UNIT_M = .01905  # metres per Hammer unit (0.75 in); a player is 72 u tall
+ENDINGS = {'expired': 'time_up', 'lease_expired': 'lost_contact', 'model_stop': 'stopped', 'stop': 'stopped',
+           'task_selected': 'task_took_over', 'superseded': 'replaced'}
+FLIGHT = {'pending': 'pending', 'active': 'on', 'off': 'off', 'refused': 'refused'}
+
+
+def _metres(units):
+    return round(units * UNIT_M, 1)
+
+
+def _motion_facts(block):
+    """One Lua motion record -> facts. Malformed fields are left out, never guessed."""
+    facts = {}
+    for key, name, floor in (('t', 'seconds', 0), ('moved', 'moved_m', 0), ('dz', 'rise_m', 8), ('drop', 'dropped_m', 52)):
+        value = block.get(key)
+        if _finite(value) and abs(value) >= floor:
+            facts[name] = round(value, 1) if key == 't' else _metres(value)
+    air = block.get('air')
+    air = [] if air == {} else air  # util.TableToJSON may encode an empty table as an object
+    if isinstance(air, list):
+        rows = [dict(up_m=_metres(j['up']), landed_m=_metres(j['land']), fwd_m=_metres(j['dist']))
+                for j in air[-3:] if isinstance(j, dict) and all(_finite(j.get(k)) for k in ('up', 'land', 'dist'))]
+        if rows:
+            facts['air'] = rows
+    if block.get('airborne') is True:
+        facts['airborne'] = True
+    return facts
+
+
+def observed(state, status, ctl):
+    """What the game observed for this run's latest drive decision; None if nothing applies.
+
+    Only telemetry carrying our run id, from the actor and world the decision was bound to,
+    counts. pending: not seen applied yet; not_applied: its intent ended unseen; active; ended.
+    """
+    hold = (status or {}).get('hold')
+    drive = state.get('drive') if isinstance(state, dict) else None
+    if not hold or ctl is None or not isinstance(drive, dict) or drive.get('ctl') != ctl:
+        return None
+    if tuple(state.get(k) for k in IDENTITY) != tuple(hold.get('binding') or ()):
+        return None
+    gen, intent = hold['generation'], status.get('intent')
+    if not hold['applied']:
+        result = dict(status='pending' if intent is not None and intent['generation'] == gen else 'not_applied')
+    elif drive.get('active') is True and drive.get('gen') == gen:
+        result = dict(status='active')
+        if _finite(drive.get('speed')):
+            result['speed_mps'] = _metres(drive['speed'])
+        if drive.get('blocked') is True:
+            result['blocked'] = True
+        if drive.get('jump') in ('pending', 'done', 'missed'):
+            result['jump'] = drive['jump']
+    else:
+        result = dict(status='ended', ended=ENDINGS.get(drive.get('lastEnd'), 'interrupted'))
+    flight, reject = drive.get('noclip'), drive.get('reject')
+    if isinstance(flight, dict) and flight.get('gen') == gen and flight.get('state') in FLIGHT:
+        result['fly'] = FLIGHT[flight['state']]
+    if isinstance(reject, dict) and reject.get('gen') == gen and reject.get('reason') == 'look_target_missing':
+        result['look'] = 'target_missing'
+    for key in ('motion', 'prevMotion'):
+        block = drive.get(key)
+        if isinstance(block, dict) and block.get('ctl') == ctl and block.get('gen') == gen:
+            result.update(_motion_facts(block))
+            break
+    return result
+
+
 def translate(intent, view, state, player=lambda alias, state: None):
     """One decoded Core control drive -> (set_intent params, seconds, ignored fields).
 
@@ -321,6 +390,7 @@ class GModControl:
 
     def __init__(self, controller, people=lambda state: ()):
         self.controller, self.people = controller, people
+        self.track = deque(maxlen=16)  # (arrival time, world, seq, position): about 8s of samples
 
     def offer(self, state):
         """What the model may choose now; None when a decision would be refused anyway."""
@@ -329,10 +399,14 @@ class GModControl:
         drive = state.get('drive') if isinstance(state.get('drive'), dict) else {}
         mode = drive.get('mode') if drive.get('mode') in ('walk', 'noclip') else 'other'
         noclip = drive.get('noclip') if isinstance(drive.get('noclip'), dict) else {}
-        intent = self.controller.status()['intent']
+        status = self.controller.status()
+        intent = status['intent']
         offer = dict(mode=mode, active=intent is not None,
                      seconds_left=0 if intent is None else math.ceil(intent['remaining']),
                      max_seconds=int(self.controller.policy.max_intent))
+        result = observed(state, status, self.controller.controller)
+        if result is not None:
+            offer['result'] = result
         # Flight is offered unless the game refused it in this world; Lua treats a mode it is
         # already in as a no-op, so a slightly stale offer is harmless.
         if mode == 'noclip' or (mode == 'walk' and noclip.get('state') != 'refused'):
@@ -355,6 +429,34 @@ class GModControl:
         if receipt.refused:
             raise ValueError(receipt.refused)
         return dict(generation=receipt.generation, transport=receipt.transport, ignored=ignored)
+
+    def observe(self, state, now=None):
+        """Feed one telemetry sample: controller evidence, plus a short position history so a
+        screen frame can be related to where he is now (since())."""
+        fb = self.controller.observe(state)
+        pos = state.get('pos') if isinstance(state, dict) else None
+        point = _point([pos.get(k) for k in 'xyz'] if isinstance(pos, dict) else pos)
+        seq = state.get('seq') if isinstance(state, dict) else None
+        if point is not None and type(seq) is int and not (self.track and self.track[-1][2] == seq):
+            self.track.append((time.time() if now is None else now, _world(state), seq, point))
+        return fb
+
+    def since(self, captured_at):
+        """How far he moved between a frame's capture (wall clock) and the latest sample, or
+        None when the history doesn't cover it."""
+        if not _finite(captured_at) or not self.track:
+            return None
+        world = self.track[-1][1]
+        rows = [r for r in self.track if r[1] == world]
+        if not rows[0][0] <= captured_at <= rows[-1][0] + .5:
+            return None
+        before = max((r for r in rows if r[0] <= captured_at), key=lambda r: r[0])
+        after = min((r for r in rows if r[0] >= captured_at), key=lambda r: r[0], default=before)
+        span = after[0] - before[0]
+        w = (captured_at - before[0]) / span if span > 0 else 0.
+        at = [b + (a - b) * w for a, b in zip(after[3], before[3])]
+        now = rows[-1][3]
+        return dict(moved_m_since=_metres(math.dist(at[:2], now[:2])), rise_m_since=_metres(now[2] - at[2]))
 
     def yield_to_task(self):
         """Core chose a task or activity: end any direct hold and let route helpers write."""

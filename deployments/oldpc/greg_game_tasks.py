@@ -66,6 +66,13 @@ class GameTasks:
                 self.active=None;self.last_outcome=None;self.last_refusal=None;self.refusals=0;self.candidates=[];self.revision+=1;self.last_candidates=-math.inf
             people=[p for p,_ in self.people(state)]
             own=position(state.get('pos'))
+            # Where each person is relative to him (metres, like control results; same bearing
+            # convention as destinations). Positions themselves stay controller-side.
+            yaw=heading(state)
+            for p in people if own else ():
+                dx,dy=p['position'][0]-own[0],p['position'][1]-own[1]
+                p['distance_m']=round(math.hypot(dx,dy)*.01905,1)  # gmod_controller.UNIT_M
+                if yaw is not None:p['bearing_relative']=round((math.degrees(math.atan2(dy,dx))-yaw+180)%360-180)
             available=bool(runtime and runtime.graph.map==state.get('map') and runtime.graph.areas and own)
             if now-self.last_candidates>=3:
                 self.candidates=[];self.last_candidates=now
