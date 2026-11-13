@@ -1516,6 +1516,8 @@ def main() -> int:
     ap.add_argument('--voice-turn-taking',action='store_true',help='opt-in Core listen choice; pair with voice adapter turn-taking')
     ap.add_argument('--core-screen', action='store_true', help='continuous bounded foreground game capture for Core-selected inspection')
     ap.add_argument('--core-game-tasks', action='store_true', help='opt-in authenticated voice to Core-selected game tasks')
+    ap.add_argument('--core-direct-control', action='store_true', help='opt-in Core direct body control (gmod_controller); requires Core game tasks and Lua greg_direct=1')
+    ap.add_argument('--core-direct-control-init', action='store_true', help='operator choice: create the controller run counter (fresh install or after a Lua bridge reload)')
     ap.add_argument('--supervised-session', action='store_true', help='opt-in bounded Core/game interaction')
     ap.add_argument('--core-root', default='', help='existing authoritative Core root; exclusive writer')
     ap.add_argument('--supervised-owner-steamid', default='', help='only this human SteamID may direct the session')
@@ -1563,6 +1565,13 @@ def main() -> int:
     from greg_capture_control import command_writer_lock
     directory=Path(a.data)/'greg';directory.mkdir(parents=True,exist_ok=True)
     with command_writer_lock(directory/'cmd.writer.lock'):
+        # The controller run id is reserved under the writer lock, before anything can publish.
+        a.controller_run=None
+        if getattr(a,'core_direct_control',False):
+            from gmod_controller import reserve_run
+            try:a.controller_run=reserve_run(directory/'controller_run.json',initialize=getattr(a,'core_direct_control_init',False))
+            except Exception as exc:  # fail closed: the controller refuses holds without a run id
+                print('[greg] controller run unavailable; direct control fails closed: '+type(exc).__name__,file=sys.stderr)
         if a.first_memory_capture:
             from greg_capture_control import CaptureGate
             gate=CaptureGate(a.capture_control,a.capture_health,a.capture_trial)
@@ -1571,12 +1580,14 @@ def main() -> int:
 
 
 def _run_bridge(a, ap, capture_gate=None):
-    global PLAYERCORE, CHAT_MEMORY, _COMMAND_OBSERVER
+    global PLAYERCORE, CHAT_MEMORY, _COMMAND_OBSERVER, DIRECT_CONTROL
     from greg_model import configure
     try:
         configure(a.model_min_tokens, a.model_timeout, a.model_reasoning)
     except ValueError as exc:
         ap.error(str(exc))
+    if getattr(a,'core_direct_control',False) and not (a.supervised_session and a.core_game_tasks):
+        ap.error('--core-direct-control requires --supervised-session and --core-game-tasks')
     if getattr(a,'core_harness',False) and not (a.supervised_session and a.core_game_tasks and a.voice_turn_taking):
         ap.error('Core harness requires supervised Core game tasks and voice turn-taking')
     if getattr(a,'quiet_test_profile',False) and not a.supervised_session:
@@ -1764,6 +1775,19 @@ def _run_bridge(a, ap, capture_gate=None):
                 PLAYERCORE.core_authority=True
                 supervised.game_authority=game_authority
                 agenda.core_decider=game_authority.decide_activity
+            if getattr(a,'core_direct_control',False):
+                # One controller per bridge run. It publishes through the same write_cmd
+                # (TickWriter) and seq counter as everything else (docs/GMOD_CONTROLLER.md).
+                from greg_controller_core import DirectController
+                from gmod_controller import GModAdapter, GModControl, bridge_publisher
+                def next_seq():
+                    nonlocal seq
+                    seq += 1
+                    return seq
+                DIRECT_CONTROL = GModControl(DirectController(GModAdapter(actionable=actionable),
+                    bridge_publisher(write_cmd, cmd_path, next_seq, lambda: latest, session, chain=lambda: _COMMAND_OBSERVER),
+                    run_id=getattr(a,'controller_run',None)), people=game_tasks.people)
+                log('CORE_DIRECT_CONTROL '+json.dumps(dict(run=getattr(a,'controller_run',None))))
             if getattr(a,'supervised_stop_file',''):
                 stop_path=Path(a.supervised_stop_file).absolute()
                 if Path(a.core_root).resolve() not in stop_path.parents or stop_path.exists() or stop_path.parent.resolve()!=stop_path.parent:
@@ -2363,6 +2387,10 @@ def _run_bridge(a, ap, capture_gate=None):
                     return 0
             time.sleep(0.1)
     finally:
+        if DIRECT_CONTROL is not None:
+            try:DIRECT_CONTROL.controller.disconnect('bridge_shutdown')  # fenced release first
+            except Exception as exc:log('CORE_CONTROL_DISCONNECT_FAILED '+type(exc).__name__)
+            DIRECT_CONTROL = None
         if game_screen is not None:game_screen.request_stop()
         if inbox_server is not None:
             inbox_server.close()
