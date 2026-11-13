@@ -29,6 +29,13 @@ def heading(state):
     return value if type(value) in (int,float) and math.isfinite(value) else None
 
 
+def unpause(task,now):
+    """Clear a pause, shifting the task's clocks by the time it was held."""
+    held=max(0.,now-task.pop('paused_at'))
+    for key in ('deadline','expires_at','review_until'):
+        if type(task.get(key)) in (int,float) and math.isfinite(task[key]):task[key]+=held
+
+
 class GameTasks:
     def __init__(self,owner_steamid=''):
         self.owner_steamid=owner_steamid
@@ -131,6 +138,7 @@ class GameTasks:
         task=slim.get('current_task') or {}
         if task:
             slim['current_task']={k:task[k] for k in ('id','kind','objective','phase','target','version','completion','attempts','feedback','final_review') if k in task}
+            if task.get('paused_at') is not None:slim['current_task']['paused']=True  # by direct control; resumes when it ends
         kinds=GameTasks.allowed_kinds(bool(slim.get('navigation_available')),task,bool(slim.get('players')),slim.get('heading') is not None)
         slim['allowed_task_kinds']=kinds
         proposal=dict(action='game_task',kind='hide',target='EXACT offered id',
@@ -245,6 +253,8 @@ class GameTasks:
                 if own is None or dest is None:raise ValueError('current route positions required')
                 # Same validated graph/path contract as ordinary game locomotion.
                 runtime.graph.route(own,dest,runtime.memory.blocked(state['map'],time.time()))
+            # A replan or replacement of a paused task resumes it first (budget not charged for the pause).
+            if self.active is not None and self.active.get('paused_at') is not None:unpause(self.active,now)
             previous=deepcopy(self.active) if continuing else None
             runtime.end_goal('abandoned','core_conversation_task')
             self.revision+=1
@@ -262,10 +272,29 @@ class GameTasks:
             if not (previous and self.active and previous['id']==self.active['id']):self.refusals=0
             return 'accepted'
 
+    def pause(self,now):
+        """Direct control took the body: hold the task, plan nothing, keep its clocks still."""
+        with self.lock:
+            if self.active is None or self.active.get('paused_at') is not None:return False
+            self.active['paused_at']=now
+            return True
+
+    def resume(self,now):
+        """Direct control ended: the paused task continues with the time it had left."""
+        with self.lock:
+            task=self.active
+            if task is None or task.get('paused_at') is None:return False
+            unpause(task,now)
+            return True
+
     def tick(self,runtime,state,now):
         with self.lock:
             task=deepcopy(self.active)
         if task is None:return None
+        if task.get('paused_at') is not None:
+            # A world change still ends it; otherwise a paused task plans nothing.
+            if tuple(task['binding'])!=binding(state):self.invalidate();return {'action':'wait'}
+            return None
         if tuple(task['binding'])!=binding(state):self.invalidate();return {'action':'wait'}
         if (task.get('completion')=='observe_cover' or task['kind'] in {'follow','approach','move'}) and now>=task.get('deadline',math.inf):
             self.finish(runtime,task,'failed','task processing budget expired',now);return {'action':'wait'}

@@ -334,26 +334,38 @@ class Publication(World):
         self.assertEqual(self.link.apply(dict(action='game_task', kind='follow', target=self.native['players'][0]['id']),
                                          self.native, self.state, self.runtime, 2), 'accepted')
 
-    def test_accepted_drive_ends_the_task_and_notes_a_request_not_a_result(self):
+    def test_accepted_drive_pauses_the_task_and_notes_a_request_not_a_result(self):
         self.follow()
         surface, controller, box = self.surface()
         row, authority, ended = self.publish(drive(), control=surface)
         self.assertEqual(row['task_outcome'], dict(verdict='accepted', kind='control_drive', generation=1,
-                                                   transport='published', ignored=[]))
+                                                   transport='published', ignored=[], task='paused'))
         self.assertEqual(row['say'], 'On my way.')
-        self.assertIsNone(self.link.active)
+        self.assertEqual(self.link.active['paused_at'], 2)  # Slice 4: paused, not ended
         self.assertEqual(ended, [('abandoned', 'core_direct_control')])
         self.assertEqual({k: authority.events[-1][k] for k in ('kind', 'command', 'qualification')},
                          dict(kind='control', command='drive', qualification='requested_not_confirmed'))
         self.assertEqual(box.actions()[-1]['action'], 'drive')
+
+    def test_a_drive_can_end_the_task_instead(self):
+        self.follow()
+        surface, _, _ = self.surface()
+        row, _, _ = self.publish(drive(task='end'), control=surface)
+        self.assertEqual((row['task_outcome']['task'], self.link.active), ('ended', None))
 
     def test_stop_ends_direct_control_but_not_the_task(self):
         self.follow()
         task = dict(self.link.active)
         surface, controller, box = self.surface()
         row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
-        self.assertEqual((row['task_outcome']['verdict'], self.link.active, ended), ('accepted', task, []))
-        self.assertEqual(box.actions()[-1]['action'], 'wait')
+        # Nothing of his to stop: no release (it would cancel the task's route in Lua), task untouched.
+        self.assertEqual((row['task_outcome']['verdict'], row['task_outcome']['reason'], self.link.active, ended),
+                         ('unchanged', 'nothing_to_stop', task, []))
+        self.assertEqual(box.actions(), [])
+        surface.apply(drive(), self.native, self.state)
+        row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
+        self.assertEqual((row['task_outcome']['verdict'], box.actions()[-1]['action'], ended), ('accepted', 'wait', []))
+        self.assertEqual(self.link.active['id'], task['id'])
         self.assertEqual(controller.publish_task({'action': 'navigate'}, 'route'), ('published', ''))
 
     def test_refused_control_changes_nothing_and_is_not_a_task_refusal(self):
