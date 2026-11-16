@@ -69,10 +69,14 @@ recover_failed_core(SimpleNamespace(call=blocked,thread=t),{'fully_drained':Fals
     def test_qualified_shutdown_function_unchanged(self):
         old=ROOT/'recovery/2026-11-12/fixtures/voice-ssh-gmod_bridge.py'
         if not old.exists(): self.skipTest('qualification baseline not shipped here')
-        def function(path):
-            tree=ast.parse(path.read_text());return ast.dump(next(n for n in tree.body
-                if isinstance(n,ast.FunctionDef) and n.name=='shutdown_bridge'),include_attributes=False)
-        self.assertEqual(function(old),function(Path(bridge.__file__)))
+        from test_supervised_bridge import QUALIFIED_SHUTDOWN_DELTA  # the one documented change (Slice 4 R1)
+        def function(path,delta=()):
+            text=ast.unparse(next(n for n in ast.parse(path.read_text()).body
+                if isinstance(n,ast.FunctionDef) and n.name=='shutdown_bridge'))
+            for new,before in delta:
+                self.assertEqual(text.count(new),1,new);text=text.replace(new,before)
+            return ast.dump(ast.parse(text),include_attributes=False)
+        self.assertEqual(function(old),function(Path(bridge.__file__),QUALIFIED_SHUTDOWN_DELTA))
 
 
 class CharacterTests(unittest.TestCase):

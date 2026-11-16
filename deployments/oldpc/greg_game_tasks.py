@@ -214,6 +214,8 @@ class GameTasks:
                         and type(x.get('captured_at')) in (int,float) and 0<=time.time()-x['captured_at']<=30
                         for x in (screen_observations or [])):
                     raise ValueError('settle requires fresh screen result from current session')
+                # Reconcile a pause first, as a replan does: a fresh stay must not absorb the old pause.
+                if self.active.get('paused_at') is not None:unpause(self.active,now)
                 self.revision+=1;self.active.update(phase='arrived',expires_at=now+(stay or 120),version=self.revision,
                     qualification='model-assessed spot from fresh frame; concealment not independently verified')
                 return 'accepted'
