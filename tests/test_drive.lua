@@ -252,6 +252,16 @@ do
     check(#console == 1 and console[1] == 'noclip', 'one toggle per generation')
     drive.watch(lp, 1.2)
     check(drive.telemetry(lp, 1.2).noclip.state == 'refused', 'unchanged move type means refused')
+    -- Gordon S3-R3: generations restart per run, so records carry the run id that produced them.
+    others = {}
+    drive.receive(hold(2, { look = { steamid = 'STEAM_0:1:1000', rate = 180, near = 0 } }), 1.3, lp)
+    run(drive, 1.3, 2)
+    local t = drive.telemetry(lp, 1.4)
+    check(t.noclip.ctl == 7 and t.reject.ctl == 7 and t.reject.reason == 'look_target_missing', 'records carry their run id')
+    local a = hold(1) a.ctl = 8
+    check(drive.receive(a, 1.5, lp) == 'applied', 'successor run, same generation number')
+    t = drive.telemetry(lp, 1.5)
+    check(t.ctl == 8 and t.gen == 1 and t.noclip.ctl == 7 and t.reject.ctl == 7, "an old run's records stay labelled as its own")
 end
 
 -- 9. Motion log (Slice 3): a jump onto a ledge is one air phase with its rise and landing height.

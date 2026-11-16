@@ -110,7 +110,7 @@ local function receive(a, now, lp)
             local current = lp:GetMoveType() == MOVETYPE_NOCLIP and "noclip" or "walk"
             if p.mode ~= current then
                 -- One toggle per generation, never on renewal; the game may refuse it (VERIFY).
-                noclip = { want = p.mode, state = "pending", gen = g, since = now, from = lp:GetMoveType() }
+                noclip = { want = p.mode, state = "pending", gen = g, ctl = RX.ctl, since = now, from = lp:GetMoveType() }
                 RunConsoleCommand("noclip")
             end
         end
@@ -147,7 +147,7 @@ local function aim(cmd, lp, look, dt, moving)
         if look.steamid then
             local q = findPlayer(look.steamid)
             if not q then
-                if not H.missing then H.missing = true reject = { gen = H.gen, reason = "look_target_missing" } end
+                if not H.missing then H.missing = true reject = { gen = H.gen, ctl = RX.ctl, reason = "look_target_missing" } end
                 return nil
             end
             at = q:GetShootPos()
@@ -297,7 +297,7 @@ function M.telemetry(lp, now)
     return { v = VERSION, ctl = RX.ctl, active = H ~= nil, gen = RX.gen, stopGen = RX.stopGen, held = held,
              lease = H and math.max(0, H.expires - now) or 0, speed = vel:Length2D(), vspeed = vel.z,
              mode = mode(lp), blocked = H and H.blocked or false, jump = H and H.jump or "none",
-             noclip = { want = noclip.want, state = noclip.state, gen = noclip.gen },
+             noclip = { want = noclip.want, state = noclip.state, gen = noclip.gen, ctl = noclip.ctl },
              reject = reject, lastEnd = lastEnd, motion = motionBlock(motion), prevMotion = motionBlock(prevMotion) }
 end
 

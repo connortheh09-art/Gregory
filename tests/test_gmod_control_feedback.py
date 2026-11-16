@@ -18,7 +18,7 @@ from gregory_core.screen import ScreenBuffer
 from greg_controller_core import DirectController
 from greg_supervised import CoreGameAuthority, bounded_turn_prompt
 from gmod_controller import GModAdapter, GModControl, observed
-from test_gmod_controller import Clock, Mailbox
+from test_gmod_controller import DEFERRED, Clock, Mailbox
 
 
 class Feedback(World):
@@ -82,6 +82,36 @@ class Feedback(World):
         self.assertIsNone(observed(dict(self.state, drive='x'), status, 7))
         self.assertIsNone(observed(self.tele(), status, None))
 
+    def test_nothing_from_the_game_counts_before_the_first_publication_is_ours(self):
+        # Gordon S3-R1: our run id in the game while the first attempt is unresolved is not yet
+        # ours (R6). Status only, no flight/motion facts; a definitely-unsent attempt then retires.
+        surface, controller, box = self.surface()
+        seen = []
+        motion = dict(gen=1, ctl=7, t=1.0, moved=105)
+
+        def hook(action, mode):
+            if action['action'] == 'drive' and not seen:
+                state = self.tele(active=True, gen=1, held=['forward'], noclip=dict(gen=1, ctl=7, state='active'),
+                                  motion=motion)
+                surface.observe(state)
+                seen.append((surface.offer(state) or {}).get('result'))
+        box.hook, box.outcomes = hook, [(DEFERRED, False)]
+        try:
+            surface.apply(drive(), self.native, self.state)
+        except ValueError:
+            pass  # refused or not, the facts above must not have been exported
+        self.assertEqual(seen, [dict(status='pending')])
+        self.assertEqual(controller.retired, 'controller_run_reused')
+
+    def test_rejected_telemetry_never_reaches_the_result(self):
+        # Gordon S3-R2: a replayed older sample must not resurrect an ended decision.
+        surface, _, _ = self.surface()
+        surface.apply(drive(), self.native, self.state)
+        active = self.tele(active=True, gen=1, held=['forward'])
+        self.assertEqual(self.result(surface, active)['status'], 'active')
+        self.assertEqual(self.result(surface, self.tele(gen=1, lastEnd='model_stop'))['status'], 'ended')
+        self.assertEqual(self.result(surface, active)['status'], 'ended')  # replay of the older seq
+
     def test_motion_facts_are_metres_bounded_and_never_guessed(self):
         surface, controller, _ = self.surface()
         surface.apply(drive(), self.native, self.state)
@@ -101,12 +131,19 @@ class Feedback(World):
     def test_flight_and_look_results_belong_to_this_decision(self):
         surface, controller, _ = self.surface()
         surface.apply(drive(fly='on'), self.native, self.state)
-        state = self.tele(active=True, gen=1, noclip=dict(state='refused', gen=1),
-                          reject=dict(gen=1, reason='look_target_missing'))
+        state = self.tele(active=True, gen=1, noclip=dict(state='refused', gen=1, ctl=7),
+                          reject=dict(gen=1, ctl=7, reason='look_target_missing'))
         self.assertEqual({k: observed(state, controller.status(), 7)[k] for k in ('fly', 'look')},
                          dict(fly='refused', look='target_missing'))
         older = self.tele(active=True, gen=1, noclip=dict(state='active', gen=0), reject=dict(gen=0, reason='look_target_missing'))
         self.assertFalse({'fly', 'look'} & set(observed(older, controller.status(), 7)))
+        # Gordon S3-R3: run 7 leaves gen-1 flight/look records; run 8's own gen 1 must not inherit them.
+        inherited = self.tele(ctl=8, active=True, gen=1, noclip=dict(state='refused', gen=1, ctl=7),
+                              reject=dict(gen=1, ctl=7, reason='look_target_missing'))
+        status = controller.status()
+        self.assertFalse({'fly', 'look'} & set(observed(inherited, status, 8) or {}))
+        self.assertEqual(observed(dict(inherited, drive=dict(inherited['drive'], noclip=dict(state='refused', gen=1, ctl=8))),
+                                  status, 8).get('fly'), 'refused')  # its own record still counts
 
     def test_jump_and_blocked_are_live_readings(self):
         surface, controller, _ = self.surface()
@@ -171,8 +208,14 @@ class Frames(World):
         self.assertEqual(surface.since(101.3), dict(moved_m_since=0.0, rise_m_since=0.0))
         for outside in (99.9, 101.6, float('nan'), 'x'):
             self.assertIsNone(surface.since(outside))
+        surface.observe(dict(self.state, seq=11, pos=dict(x=105, y=0, z=0)), now=101.3)  # replayed: rejected
+        self.assertEqual(len(surface.track), 3)  # Gordon S3-R2: no fabricated movement from a replay
+        self.assertEqual(surface.since(101.3), dict(moved_m_since=0.0, rise_m_since=0.0))
         surface.observe(dict(self.state, seq=13, bridgeSession='next', pos=dict(x=0, y=0, z=0)), now=101.4)
         self.assertIsNone(surface.since(100.25))  # another world's history says nothing about this one
+        surface.observe(dict(self.state, seq=14, bridgeSession='next', steamid='STEAM_0:0:999',
+                             pos=dict(x=105, y=0, z=0)), now=101.5)
+        self.assertIsNone(surface.since(101.4))  # Gordon S3-R2: nor another actor's, in the same world
 
     def test_screen_buffer_adds_the_adapter_note_only_when_small_and_sane(self):
         buffer = ScreenBuffer('src', 'sess')
@@ -185,6 +228,15 @@ class Frames(World):
             with self.subTest(note=note):
                 meta = buffer.inspect('sess')[1]
                 self.assertEqual((meta.get('game_facts'), meta['game']), (expected, 'gmod'))  # never the game label
+        buffer.annotator = lambda captured_at: {'bad': object()}  # Gordon S3-C1: unserializable
+        self.assertNotIn('game_facts', buffer.inspect('sess')[1])
+        buffer.annotator = lambda captured_at: {'x': float('nan')}  # not strict JSON
+        self.assertNotIn('game_facts', buffer.inspect('sess')[1])
+        shared = {'moved_m_since': 1.5}
+        buffer.annotator = lambda captured_at: shared
+        meta = buffer.inspect('sess')[1]
+        shared['moved_m_since'] = 99
+        self.assertEqual(meta['game_facts'], {'moved_m_since': 1.5})  # a plain-JSON copy, not the hook's object
         buffer.annotator = lambda captured_at: 1 / 0
         self.assertEqual(buffer.inspect('sess')[1]['status'], 'ready')  # a broken hook never costs the frame
 

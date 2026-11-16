@@ -275,7 +275,7 @@ a legitimate restart, a retired run's stop, and malformed ids.
   (`greg_locomotion.lua:62`): `cmd:SetViewAngles` plus `lp:SetEyeAngles`.
 - **Tracked look.** `steamid`: find the player every command and aim at `EyePos()`, rate-limited
   like a yaw/pitch target. If the player is missing or invalid, keep the view and report
-  `reject={gen, reason="look_target_missing"}` once. `point`: aim at the point. Within 16 u
+  `reject={gen, ctl, reason="look_target_missing"}` once. `point`: aim at the point. Within 16 u
   horizontally of the target, stop updating yaw so he doesn't spin in place.
 - **Stand-off.** With a tracked look and `near > 0`, while the horizontal distance to the
   target is at most `near`, drop positive forward motion. Strafing and backing away still apply,
@@ -318,8 +318,8 @@ Advertise `capabilities.drive = 1` and add `state.drive`:
 drive = { v=1, ctl=int, active=bool, gen=int, stopGen=int, held={"forward","speed",...},
           lease=<s left>, speed=<GetVelocity():Length2D()>, vspeed=<z velocity>,
           mode="walk"|"noclip"|"other", blocked=bool, jump="none"|"pending"|"done"|"missed",
-          noclip={want=..., state="idle"|"pending"|"active"|"off"|"refused", gen=int},
-          reject={gen=..., reason=...}, lastEnd="lease_expired"|"stop"|"interlock"|... }
+          noclip={want=..., state="idle"|"pending"|"active"|"off"|"refused", gen=int, ctl=int},
+          reject={gen=..., ctl=..., reason=...}, lastEnd="lease_expired"|"stop"|"interlock"|... }
 ```
 Slice 3 adds `motion` and `prevMotion`, the motion logs of the latest and the previous
 generation (game units):
