@@ -491,8 +491,10 @@ class GModControl:
 
     def allows(self, action):
         """May a write that bypasses the controller go out now? Never movement or a release
-        while direct control holds the body; speech and the rest always may."""
-        return not (self.controller.adapter.is_movement(action) and self.holding())
+        while direct control holds the body, or once this run is retired (a newer run owns the
+        fence, or our id was reused); speech and the rest always may."""
+        moving = self.controller.adapter.is_movement(action)
+        return not (moving and (self.holding() or self.controller.retired))
 
     def tick(self):
         """Owner-loop heartbeat: renew, expire, or retry a release."""
@@ -516,3 +518,25 @@ class GModControl:
 
     def _player(self, alias, state):
         return next((steamid for row, steamid in self.people(state) if row.get('id') == alias), None)
+
+
+def shutdown_fence(control, tick_writer):
+    """Bridge shutdown, before shutdown_bridge: disconnect, and decide the final stop.
+
+    If this tick already wrote, TickWriter queued the fenced release as a pending stop that no
+    later tick would send: publish it now rather than leave it pending. The fence must not
+    depend on that transient write, though (a latest-envelope reader can miss it), so the final
+    stop shutdown_bridge writes carries it: {'action': 'wait', ctl, driveGen, reason}. A retired
+    run owns nothing: no fence, and no final stop at all, since even a plain wait would cancel
+    the newer owner. Returns {'stop', 'stop_action', 'generation', 'refused'} (JSON-safe).
+    """
+    receipt = control.controller.disconnect('bridge_shutdown')
+    if tick_writer is not None and tick_writer.pending_stop:
+        tick_writer.begin_tick(time.monotonic())
+    core = control.controller
+    if core.retired:
+        return dict(stop=False, stop_action=None, generation=receipt.generation, refused=receipt.refused)
+    action = None
+    if core.controller is not None and not receipt.refused:
+        action, _ = core.adapter.release_action(receipt.generation, 'bridge_shutdown', core.controller)
+    return dict(stop=True, stop_action=action, generation=receipt.generation, refused=receipt.refused)

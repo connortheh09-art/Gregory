@@ -1340,7 +1340,8 @@ class ShutdownIncomplete(RuntimeError):
 
 
 def shutdown_bridge(*, worker, social, tracker, recorder, cmd_path, latest,
-                    target, stop_sequence, session, capture, state_tail, deadline_seconds=2.0):
+                    target, stop_sequence, session, capture, state_tail, deadline_seconds=2.0,
+                    stop_action=None):
     """Cancel all intake, bound producer drain, never close a live producer's sink.
 
     The deadline bounds this function's joins, not Python interpreter exit. A
@@ -1373,7 +1374,7 @@ def shutdown_bridge(*, worker, social, tracker, recorder, cmd_path, latest,
             if previous_observer is not None:
                 previous_observer(payload, **status)
         stop_status = 'write_failed'
-        written = write_cmd(cmd_path, stop_sequence, {'action': 'wait'}, latest,
+        written = write_cmd(cmd_path, stop_sequence, dict(stop_action or {'action': 'wait'}), latest,
                             session, 'stop', observer=observe)
         # Existing observation-preserving wrappers can discard return values.
         # Neither file publication route claims a game acknowledgement.
@@ -1812,7 +1813,8 @@ def _run_bridge(a, ap, capture_gate=None):
                         voice_session.begin_drain()
                     log('SUPERVISED_DRAIN_START ' + json.dumps(dict(grace_seconds=35)))
                     if DIRECT_CONTROL is not None:DIRECT_CONTROL.controller.stop('supervised_drain')
-                    if latest:
+                    # A retired run's plain wait would cancel the newer owner (Gordon S4-R2).
+                    if latest and (DIRECT_CONTROL is None or not DIRECT_CONTROL.controller.retired):
                         seq += 1
                         write_cmd(cmd_path, seq, {'action':'wait'}, latest, session, 'stop')
                 if phase in ('drained', 'expired'):
@@ -2387,8 +2389,12 @@ def _run_bridge(a, ap, capture_gate=None):
                     return 0
             time.sleep(0.1)
     finally:
+        shutdown_stop=dict(stop_action=None,stop=True)
         if DIRECT_CONTROL is not None:
-            try:DIRECT_CONTROL.controller.disconnect('bridge_shutdown')  # fenced release first
+            try:
+                from gmod_controller import shutdown_fence
+                shutdown_stop=shutdown_fence(DIRECT_CONTROL, tick_writer)  # the final stop carries the fence
+                log('CORE_CONTROL_SHUTDOWN '+json.dumps(shutdown_stop))
             except Exception as exc:log('CORE_CONTROL_DISCONNECT_FAILED '+type(exc).__name__)
             DIRECT_CONTROL = None
         if game_screen is not None:game_screen.request_stop()
@@ -2399,8 +2405,9 @@ def _run_bridge(a, ap, capture_gate=None):
         primary = sys.exc_info()[1]
         try:
             receipt=shutdown_bridge(worker=worker, social=social, tracker=tracker, recorder=recorder,
-                cmd_path=cmd_path, latest=latest, target=target, stop_sequence=seq + 1,
-                session=session, capture=a.first_memory_capture, state_tail=state_tail)
+                cmd_path=cmd_path, latest=latest, target=target if shutdown_stop['stop'] else None, stop_sequence=seq + 1,
+                session=session, capture=a.first_memory_capture, state_tail=state_tail,
+                stop_action=shutdown_stop['stop_action'])
             if game_screen is not None:
                 log('CORE_SCREEN_STOP '+json.dumps(dict(stopped=not game_screen.pending,capture_failures=game_screen.loop.failures)))
             if core is not None and receipt['fully_drained']:

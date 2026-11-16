@@ -15,6 +15,12 @@ import gmod_bridge as bridge
 from greg_supervised import TickWriter, SessionWindow
 
 
+
+# The only change to the qualified shutdown since the 2026-11-12 baseline (Slice 4 R1, Gordon
+# S4-R1): the final stop may carry the direct-control fence. Default behaviour is unchanged.
+QUALIFIED_SHUTDOWN_DELTA=((", stop_action=None)", ")"),
+                          ("dict(stop_action or {'action': 'wait'})", "{'action': 'wait'}"))
+
 class Lane:
     def __init__(self): self.messages=[];self.invalidated=0
     def hear(self, text): self.messages.append(text)
@@ -108,11 +114,14 @@ class BridgeTests(unittest.TestCase):
 
     def test_qualified_shutdown_and_producer_group_unchanged(self):
         base=ROOT/'recovery/2026-11-12/fixtures/baseline'
-        def function(p,name):
-            return ast.dump(next(n for n in ast.parse(p.read_text()).body if
-                isinstance(n,ast.FunctionDef) and n.name==name),include_attributes=False)
+        def function(p,name,delta=()):
+            text=ast.unparse(next(n for n in ast.parse(p.read_text()).body if
+                isinstance(n,ast.FunctionDef) and n.name==name))
+            for new,old in delta:
+                self.assertEqual(text.count(new),1,new);text=text.replace(new,old)
+            return ast.dump(ast.parse(text),include_attributes=False)
         self.assertEqual(function(base/'gmod_bridge.py','shutdown_bridge'),
-                         function(Path(bridge.__file__),'shutdown_bridge'))
+                         function(Path(bridge.__file__),'shutdown_bridge',QUALIFIED_SHUTDOWN_DELTA))
         self.assertEqual((base/'greg_producers.py').read_bytes(),
                          (ROOT/'deployments/oldpc/greg_producers.py').read_bytes())
 

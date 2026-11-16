@@ -207,7 +207,8 @@ direct action doesn't throw a task away.
 - **Resumption.** `GModControl.settle()`, once per owner-loop pass, reports when direct control
   has ended (any reason) and lets route helpers write again (`allow_tasks`). The bridge then calls
   `GameTasks.resume(now)`: the task continues with the time it had left. Its deadline, stay and
-  review clocks are shifted by the pause. Replanning or replacing a paused task resumes it first;
+  review clocks are shifted by the pause. Replanning, replacing or settling a paused task resumes it first (a settle's fresh stay
+  starts from the settle, not shifted by the old pause);
   `continue` keeps it paused.
 - **When control has ended.** `holding()` is true while an intent is active and until the game
   settles its release (acknowledged, observed clear, superseded, or retries given up after 3s).
@@ -233,8 +234,19 @@ direct action doesn't throw a task away.
 - **Writer.** The controller publishes through `bridge_publisher` over the bridge's own
   `write_cmd` (the TickWriter wrapper in supervised sessions) and shares its `seq` counter
   (`next_seq`). The recorder observer is chained.
-- **Shutdown.** The `finally` block disconnects (`bridge_shutdown`, a fenced release) before
-  `shutdown_bridge` writes its legacy stop.
+- **Shutdown.** The `finally` block calls `shutdown_fence` before `shutdown_bridge`: disconnect
+  (`bridge_shutdown`), and if TickWriter queued that fenced release behind this tick's write,
+  publish it rather than leave it pending. The fence does not rely on that transient write (a
+  latest-envelope reader can miss it): the final stop `shutdown_bridge` writes is itself the
+  fenced `{"action":"wait","ctl","driveGen","reason":"bridge_shutdown"}` (its one change since
+  the qualified baseline: an optional `stop_action`, pinned as a documented delta). A retired
+  run publishes no fence and no final stop at all (`target=None`), since even a plain wait
+  would cancel the newer owner.
+- **Retired run.** Once the controller retires (a newer run id seen, or ours reused), `allows()`
+  refuses legacy movement/release writes too, matching `publish_task`. Every bridge movement or
+  release producer goes through that rule: the main action write, the STUCK look and the chat
+  wait via `allows()`, the supervised-drain wait and the shutdown stop via `controller.retired`;
+  route helpers via `publish_task`. Speech-only writes are unaffected.
 - **Lua.** Install `greg_drive.lua` and set `greg_direct 1`. Without the capability Python
   never offers control.
 
