@@ -163,7 +163,8 @@ function M.step(cmd, lp, now, dt)
     local flying = lp:GetMoveType() == MOVETYPE_NOCLIP
     local fwd, side = p.forward, p.right
     local dist = p.look and aim(cmd, lp, p.look, dt, fwd ~= 0 or side ~= 0) or nil
-    if dist and p.look.near > 0 and dist <= p.look.near and fwd > 0 then fwd = 0 end -- stand-off
+    local standoff = dist and p.look.near > 0 and dist <= p.look.near
+    if standoff and fwd > 0 then fwd = 0 end
     local wish = math.sqrt(fwd * fwd + side * side)
     local target = wish > 0 and p.speed * lp:GetRunSpeed() or 0
     -- Ramp speed (+600/-900 u/s^2) and swing the wish direction at <=360 deg/s: changes curve.
@@ -175,6 +176,7 @@ function M.step(cmd, lp, now, dt)
     end
     if H.speed > 0 and H.dir then
         local f, s = math.cos(math.rad(H.dir)) * H.speed, math.sin(math.rad(H.dir)) * H.speed
+        if standoff and f > 0 then f = 0 end -- stand-off holds on the output too: no carried forward ramp
         cmd:SetForwardMove(f)
         cmd:SetSideMove(s)
         if f > 1 then out[#out + 1] = "forward" elseif f < -1 then out[#out + 1] = "back" end
@@ -189,11 +191,11 @@ function M.step(cmd, lp, now, dt)
     else
         if p.crouch then cmd:AddKey(IN_DUCK) out[#out + 1] = "duck" end
         if H.tapDue then
-            if lp:OnGround() then
+            if now > H.tapDue then -- deadline first: a late grounded command must not jump
+                H.tapDue, H.jump = nil, "missed"
+            elseif lp:OnGround() then
                 cmd:AddKey(IN_JUMP) out[#out + 1] = "jump"
                 H.tapDue, H.jump = nil, "done"
-            elseif now > H.tapDue then
-                H.tapDue, H.jump = nil, "missed"
             end
         elseif p.jump == "hold" then
             -- Source ignores a jump held from the last command (no pogo), so re-press on each

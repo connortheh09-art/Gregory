@@ -162,6 +162,13 @@ do
     lp.ground = true
     local c = cmd() drive.step(c, lp, .7, .015)
     check(not c.keys[IN_JUMP] and drive.telemetry(lp, .7).jump == 'missed', 'late tap is missed')
+    -- No command between receipt and the deadline: the first one, grounded and late, must not jump.
+    drive = load()
+    lp.ground = false
+    drive.receive(hold(1, { jump = 'tap' }), 0, lp)
+    lp.ground = true
+    c = cmd() drive.step(c, lp, .7, .015)
+    check(not c.keys[IN_JUMP] and drive.telemetry(lp, .7).jump == 'missed', 'first grounded step after the deadline is missed')
 end
 
 -- 4. Analog speed ramps; IN_SPEED only above walk speed.
@@ -188,6 +195,27 @@ do
     drive.receive(hold(2, { look = { steamid = 'STEAM_0:1:1000', rate = 180, near = 80 } }), 1, lp)
     run(drive, 1, 2)
     check(drive.telemetry(lp, 1.1).reject.reason == 'look_target_missing', 'a missing look target is reported')
+end
+
+-- 5b. Stand-off entered while already moving (straight and diagonal).
+do
+    local drive, c
+    for _, move in ipairs({ { forward = 1, right = 0 }, { forward = 1, right = 1 } }) do
+        drive = load()
+        others = {}
+        move.up, move.speed = 0, 1
+        drive.receive(hold(1, { move = move }), 0, lp)
+        run(drive, 0, 60)
+        others = { { valid = true, SteamID = function() return 'STEAM_0:1:1000' end, IsDormant = function() return false end,
+                     GetShootPos = function() return Vector(50, 0, 64) end } }
+        drive.receive(hold(2, { move = move, look = { steamid = 'STEAM_0:1:1000', rate = 180, near = 80 } }), 1, lp)
+        local worst = 0
+        for k = 1, 30 do c = cmd() drive.step(c, lp, 1 + k * .015, .015) worst = math.max(worst, c.fwd or 0) end
+        local fwdHeld = false
+        for _, k in ipairs(drive.telemetry(lp, 1.5).held) do fwdHeld = fwdHeld or k == 'forward' end
+        check(worst < 1 and not fwdHeld, 'stand-off entered while moving emits no forward input (right=' .. move.right .. ')')
+    end
+    others = {}
 end
 
 -- 6. Lease expiry releases on the next command and clears held inputs.
