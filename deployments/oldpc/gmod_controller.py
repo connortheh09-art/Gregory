@@ -300,6 +300,10 @@ def observed(state, status, ctl):
     gen, intent = hold['generation'], status.get('intent')
     if not hold['applied']:
         result = dict(status='pending' if intent is not None and intent['generation'] == gen else 'not_applied')
+        if not hold['published']:
+            # Our run id in the game before any attempt carrying it is attested is not yet ours
+            # (R6: a reused id carries someone else's flight/motion). Status only until then.
+            return result
     elif drive.get('active') is True and drive.get('gen') == gen:
         result = dict(status='active')
         if _finite(drive.get('speed')):
@@ -311,9 +315,10 @@ def observed(state, status, ctl):
     else:
         result = dict(status='ended', ended=ENDINGS.get(drive.get('lastEnd'), 'interrupted'))
     flight, reject = drive.get('noclip'), drive.get('reject')
-    if isinstance(flight, dict) and flight.get('gen') == gen and flight.get('state') in FLIGHT:
+    # Generations restart per run: flight/look records count only with this run's id too.
+    if isinstance(flight, dict) and (flight.get('ctl'), flight.get('gen')) == (ctl, gen) and flight.get('state') in FLIGHT:
         result['fly'] = FLIGHT[flight['state']]
-    if isinstance(reject, dict) and reject.get('gen') == gen and reject.get('reason') == 'look_target_missing':
+    if isinstance(reject, dict) and (reject.get('ctl'), reject.get('gen')) == (ctl, gen) and reject.get('reason') == 'look_target_missing':
         result['look'] = 'target_missing'
     for key in ('motion', 'prevMotion'):
         block = drive.get(key)
@@ -390,7 +395,8 @@ class GModControl:
 
     def __init__(self, controller, people=lambda state: ()):
         self.controller, self.people = controller, people
-        self.track = deque(maxlen=16)  # (arrival time, world, seq, position): about 8s of samples
+        self.track = deque(maxlen=16)  # (arrival time, actor+world, seq, position): about 8s of samples
+        self.admitted = None  # the last sample the controller accepted (fresh, in order)
 
     def offer(self, state):
         """What the model may choose now; None when a decision would be refused anyway."""
@@ -404,7 +410,7 @@ class GModControl:
         offer = dict(mode=mode, active=intent is not None,
                      seconds_left=0 if intent is None else math.ceil(intent['remaining']),
                      max_seconds=int(self.controller.policy.max_intent))
-        result = observed(state, status, self.controller.controller)
+        result = observed(self.admitted, status, self.controller.controller)  # never a replayed sample
         if result is not None:
             offer['result'] = result
         # Flight is offered unless the game refused it in this world; Lua treats a mode it is
@@ -433,12 +439,16 @@ class GModControl:
     def observe(self, state, now=None):
         """Feed one telemetry sample: controller evidence, plus a short position history so a
         screen frame can be related to where he is now (since())."""
+        before = self.controller.feedback
         fb = self.controller.observe(state)
-        pos = state.get('pos') if isinstance(state, dict) else None
+        if fb is None or fb is before:  # unreadable, or stale/replayed: the controller kept the old one
+            return fb
+        self.admitted = state
+        pos = state.get('pos')
         point = _point([pos.get(k) for k in 'xyz'] if isinstance(pos, dict) else pos)
-        seq = state.get('seq') if isinstance(state, dict) else None
-        if point is not None and type(seq) is int and not (self.track and self.track[-1][2] == seq):
-            self.track.append((time.time() if now is None else now, _world(state), seq, point))
+        if point is not None:
+            identity = tuple(state.get(k) for k in IDENTITY)  # another actor's position is not his motion
+            self.track.append((time.time() if now is None else now, identity, state['seq'], point))
         return fb
 
     def since(self, captured_at):
@@ -446,8 +456,8 @@ class GModControl:
         None when the history doesn't cover it."""
         if not _finite(captured_at) or not self.track:
             return None
-        world = self.track[-1][1]
-        rows = [r for r in self.track if r[1] == world]
+        key = self.track[-1][1]
+        rows = [r for r in self.track if r[1] == key]
         if not rows[0][0] <= captured_at <= rows[-1][0] + .5:
             return None
         before = max((r for r in rows if r[0] <= captured_at), key=lambda r: r[0])

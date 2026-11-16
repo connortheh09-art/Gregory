@@ -90,9 +90,11 @@ class ScreenBuffer:
             meta=dict(meta,status='ready',age_seconds=round(now-started,3),
                       display_name=label+'_'+self.game+'_'+meta['frame_id']+'.jpg')
         if self.annotator is not None:
-            try:note=self.annotator(meta['captured_at'])
-            except Exception:note=None
-            if isinstance(note,dict) and note and len(json.dumps(note))<=200:meta['game_facts']=note
+            try:  # fail soft: a hook that raises or returns something unserializable costs only the note
+                note=self.annotator(meta['captured_at'])
+                text=json.dumps(note,allow_nan=False) if isinstance(note,dict) and note else None
+                if text is not None and len(text)<=200:meta['game_facts']=json.loads(text)
+            except Exception:pass
         # Copy bytes before eviction; an in-flight inference never refers to a deleted path.
         return 'data:image/jpeg;base64,'+base64.b64encode(data).decode('ascii'),meta
 
