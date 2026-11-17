@@ -88,7 +88,7 @@ class LMStudioProvider:
                 'current observation or your whole identity. Do not invent experiences, capabilities or completed '
                 'actions. Never infer an empty life history from a retrieval miss. '
                 'Conversational memory writes are unavailable: do not imply a lasting save or trait update succeeded. '
-                'Return JSON with say, optional intent, and used_memory_ids: only IDs from supplied historical '
+                'Return JSON with optional intent, say, and used_memory_ids: only IDs from supplied historical '
                 'evidence that your answer actually uses, or an empty list. '
                 'A proposed intent is not execution. Goals: ' + json.dumps(profile['goals']))),
             dict(role='user', content=([dict(type='text',text=prompt)]+[

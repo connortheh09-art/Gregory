@@ -77,7 +77,7 @@ class TaskTests(unittest.TestCase):
   with self.assertRaises(ValueError):self.apply('hold',position=[0,0,0])
  def test_prompt_requires_correct_outer_reply_envelope(self):
   prompt=self.link.instruction(self.offered)
-  self.assertIn('keys say, intent, used_memory_ids',prompt)
+  self.assertIn('keys intent, say, used_memory_ids',prompt)  # lean L1: action first
   self.assertNotIn('Return optional intent',prompt)
  def test_disconnected_nearby_area_is_not_offered(self):
   self.runtime.graph.links={1:{},2:{}}

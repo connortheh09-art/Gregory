@@ -1135,8 +1135,8 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
     """Core's direct-control decision, applied once at publication (docs/GMOD_CONTROLLER.md).
 
     The latest decision wins. A drive pauses the current game task until direct control ends,
-    or ends it with task:"end". A stop ends direct control only; ending a task stays the
-    deliberate task `cancel`. A refusal changes nothing, replaces the spoken claim and is not
+    or ends it with task:"end". Lean: a stop ends direct control and the current task (task
+    `cancel` is not offered beside control). A refusal changes nothing, replaces the spoken claim and is not
     a task refusal (no recovery turns).
     """
     intent = row['game_intent']
@@ -1149,6 +1149,8 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
         if command != 'stop' and not (row.get('activity_options') or {}).get('control'):
             raise ValueError('control was not offered')
         detail = control.apply(intent, row.get('game_task_view'), latest)
+        if command == 'stop' and game_tasks is not None and runtime is not None and game_tasks.end_by_stop(runtime):
+            detail = dict(detail, noop=False, task='ended')  # lean L3: one stop for body and task
     except ValueError as exc:
         reason = str(exc)[:160]
         if authority is not None:

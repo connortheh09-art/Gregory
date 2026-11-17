@@ -20,7 +20,7 @@ try:
 except ImportError:
     sys.modules['requests'] = SimpleNamespace(post=None, get=None, RequestException=Exception)
 
-from gregory_core.decision_contract import (CONTROL_HINT, CONTROL_MOVES, CONTROL_PACES, CONTROL_TURNS,
+from gregory_core.decision_contract import (CONTROL_MOVES, CONTROL_PACES, CONTROL_TURNS,
                                             SchemaViolation, TurnChoices, enum, envelope, obj)
 from gregory_core.runtime import FixtureProvider
 from greg_controller_core import DirectController
@@ -69,11 +69,42 @@ class Contract(World):
                 c.decode(drive(), s)
 
     def test_owner_turn_offers_drive_and_stop_with_turn_local_labels(self):
-        c, s = self.contract()
+        c, s = self.contract(dict(OFFER, active=True))
         self.assertEqual(c.decode(drive(look='P1'), s)['look'], dict(player=self.native['players'][0]['id']))
         self.assertEqual(c.decode(drive(look='D1'), s)['look'], dict(destination=self.native['destinations'][0]['id']))
         self.assertEqual(c.decode(drive(look='turn_left'), s)['look'], 'turn_left')
         self.assertEqual(c.decode(dict(action='control', command='stop'), s), dict(action='control', command='stop'))
+
+    def test_lean_menu_and_hint(self):
+        # Lean L1: the action is generated before the spoken line.
+        c, s = self.contract()
+        self.assertEqual(list(s['properties'])[:2], ['intent', 'say'])
+        # Lean L3: beside control, drive covers relative moves and stop covers cancel.
+        from greg_game_tasks import GameTasks
+        self.assertNotIn('move', GameTasks.allowed_kinds(True, {}, True, True, control=True))
+        self.assertIn('move', GameTasks.allowed_kinds(True, {}, True, True))
+        # Lean L4: a jump example, and stop explained only when it is offered.
+        from gregory_core.decision_contract import control_hint
+        idle, busy = control_hint(OFFER), control_hint(OFFER, task=True)
+        self.assertIn('"move":"none","jump":"tap"', idle)
+        self.assertNotIn('"command":"stop"', idle)
+        self.assertIn('"command":"stop"', busy)
+        self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
+
+    def test_stop_is_offered_only_with_something_to_stop(self):
+        # Lean L2: idle with no task, stop is not on the menu (the real-VC no-op stops).
+        stop = dict(action='control', command='stop')
+        c, s = self.contract()
+        with self.assertRaises(SchemaViolation):
+            c.decode(stop, s)
+        self.assertEqual(c.decode(drive(move='none', jump='tap', seconds=1), s)['jump'], 'tap')
+        native = dict(self.native, current_task=dict(id='t1', kind='follow', target=dict(id=self.native['players'][0]['id']), attempts=0))
+        c = TurnChoices(native)
+        s = c.schema(c.view, dict(binding=self.binding, control=OFFER))
+        self.assertEqual(c.decode(stop, s), stop)
+        for kind in ('cancel', 'move'):  # Lean L3: stop and drive cover these beside control
+            with self.subTest(kind=kind), self.assertRaises(SchemaViolation):
+                c.decode(dict(action='game_task', kind=kind, task_id='T1'), s)
 
     def test_unknown_labels_native_ids_bad_bounds_and_shapes_are_refused(self):
         c, s = self.contract()
@@ -140,7 +171,7 @@ class Contract(World):
             prompt, _ = bounded_turn_prompt('', 'walk to me', live, [], [], internal=internal,
                                             task_view=TurnChoices(self.native).view, decision_context=context)
             with self.subTest(internal=internal, shown=shown):
-                self.assertEqual(CONTROL_HINT in prompt, shown)
+                self.assertEqual('BODY CONTROL' in prompt, shown)
                 self.assertEqual('control' in context['live']['activity_options'], 'control' in live['activity_options'])
 
     def test_budget_pressure_drops_the_control_offer_not_the_turn(self):
@@ -152,7 +183,7 @@ class Contract(World):
         # A prefix that fits without control but not with its hint and offer.
         room = 5800 - len('\nRECENT_DIALOGUE:[]') - len(bare.split('\nRECENT_DIALOGUE:')[0])
         prompt, _ = bounded_turn_prompt('x' * (room - 10), 'q', live, [], [], task_view=c.view, decision_context=context)
-        self.assertNotIn(CONTROL_HINT, prompt)
+        self.assertNotIn('BODY CONTROL', prompt)
         schema = c.schema(context['task_view'], context['live']['activity_options'])
         with self.assertRaises(SchemaViolation):
             c.decode(drive(), schema)
@@ -353,19 +384,19 @@ class Publication(World):
         row, _, _ = self.publish(drive(task='end'), control=surface)
         self.assertEqual((row['task_outcome']['task'], self.link.active), ('ended', None))
 
-    def test_stop_ends_direct_control_but_not_the_task(self):
+    def test_stop_ends_direct_control_and_the_task(self):
         self.follow()
-        task = dict(self.link.active)
         surface, controller, box = self.surface()
         row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
-        # Nothing of his to stop: no release (it would cancel the task's route in Lua), task untouched.
-        self.assertEqual((row['task_outcome']['verdict'], row['task_outcome']['reason'], self.link.active, ended),
-                         ('unchanged', 'nothing_to_stop', task, []))
+        # Lean L3: one stop. No hold of his to release, but the task ends (route dropped).
+        self.assertEqual((row['task_outcome']['verdict'], row['task_outcome'].get('task'), self.link.active),
+                         ('accepted', 'ended', None))
         self.assertEqual(box.actions(), [])
+        row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
+        self.assertEqual((row['task_outcome']['verdict'], row['task_outcome']['reason']), ('unchanged', 'nothing_to_stop'))
         surface.apply(drive(), self.native, self.state)
         row, _, ended = self.publish(dict(action='control', command='stop'), control=surface, offer={})
         self.assertEqual((row['task_outcome']['verdict'], box.actions()[-1]['action'], ended), ('accepted', 'wait', []))
-        self.assertEqual(self.link.active['id'], task['id'])
         self.assertEqual(controller.publish_task({'action': 'navigate'}, 'route'), ('published', ''))
 
     def test_refused_control_changes_nothing_and_is_not_a_task_refusal(self):
