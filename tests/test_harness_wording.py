@@ -50,7 +50,7 @@ class ReceiptWording(unittest.TestCase):
   self.assertIn("that spot wasn't one of my current options",prompt)
   self.assertNotIn('unoffered destination',prompt)
   self.assertEqual(receipt['reason'],'unoffered destination')
-  self.assertIn('never add, guess or embellish a different cause',prompt)
+  self.assertIn('giving only receipt.explanation as the reason',prompt)
  def test_accepted_and_no_change_receipts_have_no_refusal_explanation(self):
   self.publish();self.assertIsNone(self.lane.queue[0]['execution_receipt']['explanation'])
   self.lane.queue.clear();self.lane.turn_ledger.clear()
@@ -61,10 +61,10 @@ class ReceiptWording(unittest.TestCase):
  def test_accept_guidance_is_conversational_and_keeps_existing_guards(self):
   self.row['game_intent']=dict(action='game_task',kind='visit',target=self.target)
   self.publish();self.finalize();prompt=self.asked[0]['prompt']
-  self.assertIn('lead the way',prompt);self.assertIn('never say task, request, accepted, queued or system',prompt)
-  # Pre-existing honesty contracts survive the wording change.
-  for clause in ('world result is UNKNOWN','no_change does NOT mean you lack controls',
-                 'never claim already moved, arrived, hidden or spawned','You cannot issue another tool here'):
+  self.assertIn('lead the way',prompt);self.assertIn('Talk like a person, not a system',prompt)
+  # Pre-existing honesty contracts survive the lean wording (L5), stated positively.
+  for clause in ('talk about the attempt, not a result','You still have your game controls next turn',
+                 'it has started','This reply is speech only'):
    self.assertIn(clause,prompt)
 
 if __name__=='__main__':unittest.main()

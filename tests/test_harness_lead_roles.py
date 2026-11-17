@@ -32,20 +32,19 @@ class LeadRoles(unittest.TestCase):
   self.publish();receipt=self.lane.queue[0]['execution_receipt']
   self.assertEqual(receipt['status'],'no_change')
   self.finalize();prompt=self.asked[0]['prompt']
-  self.assertIn('do not say you are choosing, picking, heading or about to go',prompt)
-  self.assertIn('Say you have not started that change',prompt)
-  # Existing honesty contracts are unchanged.
-  self.assertIn('no_change does NOT mean you lack controls',prompt)
-  self.assertIn('You cannot issue another tool here',prompt)
+  # Lean L5: positive wording; no example sentence to parrot.
+  self.assertIn('say plainly you did not do it and offer to try',prompt)
+  self.assertNotIn('I have not started moving',prompt)
+  self.assertIn('You still have your game controls next turn',prompt)
+  self.assertIn('This reply is speech only',prompt)
  def test_no_image_draft_cannot_invent_visible_suggestions(self):
   self.publish();self.finalize()
-  self.assertIn('No image was supplied this turn',self.asked[0]['prompt'])
-  self.assertIn('never describe visible features',self.asked[0]['prompt'])
+  self.assertIn('You have no image this turn: talk about what you know, not what you see',self.asked[0]['prompt'])
  def test_ready_image_preserves_grounded_vision_instead_of_denial(self):
   self.row['screen_observations']=[dict(status='ready')]
   self.publish();self.finalize()
-  self.assertIn('Preserve only image-grounded observations',self.asked[0]['prompt'])
-  self.assertNotIn('No image was supplied this turn',self.asked[0]['prompt'])
+  self.assertIn('Mention only what the image shows',self.asked[0]['prompt'])
+  self.assertNotIn('You have no image this turn',self.asked[0]['prompt'])
  def test_guidance_adds_no_new_task_kinds_or_parser(self):
   kinds=GameTasks.allowed_kinds(True,None,True,True)
   self.assertEqual(sorted(kinds),sorted(['continue','cancel','hold','visit','hide','follow','approach','move']))

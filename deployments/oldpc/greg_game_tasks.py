@@ -123,23 +123,24 @@ class GameTasks:
         with self.lock:return deepcopy(self.view)
 
     @staticmethod
-    def allowed_kinds(navigation_available,task,has_players=False,has_heading=False):
-        kinds=['continue','cancel','hold']
+    def allowed_kinds(navigation_available,task,has_players=False,has_heading=False,control=False):
+        # Lean L3: with body control offered, control stop ends a task and drive covers relative moves.
+        kinds=['continue','hold'] if control else ['continue','cancel','hold']
         if navigation_available:kinds+=['visit','hide']
         if navigation_available and has_players:kinds+=['follow','approach']
-        if navigation_available and has_heading:kinds+=['move']
+        if navigation_available and has_heading and not control:kinds+=['move']
         if task and task.get('phase')=='needs_review' and task.get('completion')=='observe_cover':
             kinds.append('settle')
         return kinds
 
     @staticmethod
-    def instruction(view,*,internal=False):
+    def instruction(view,*,internal=False,control=False):
         slim=dict(view or {})
         task=slim.get('current_task') or {}
         if task:
             slim['current_task']={k:task[k] for k in ('id','kind','objective','phase','target','version','completion','attempts','feedback','final_review') if k in task}
             if task.get('paused_at') is not None:slim['current_task']['paused']=True  # by direct control; resumes when it ends
-        kinds=GameTasks.allowed_kinds(bool(slim.get('navigation_available')),task,bool(slim.get('players')),slim.get('heading') is not None)
+        kinds=GameTasks.allowed_kinds(bool(slim.get('navigation_available')),task,bool(slim.get('players')),slim.get('heading') is not None,control=control)
         slim['allowed_task_kinds']=kinds
         proposal=dict(action='game_task',kind='hide',target='EXACT offered id',
             objective='short purpose',stay_seconds=120,completion='observe_cover')
@@ -150,23 +151,23 @@ class GameTasks:
         settle=('After fresh inspect_screen, settle with task_id and stay_seconds may stay. '
                 if 'settle' in kinds else 'settle is unavailable now; settled/holding means keep staying. ')
         if task.get('final_review'):settle+='final_review: no more replans; settle or cancel. '
-        settle+='continue/settle/hold/cancel take no target. '
+        settle+=('continue/settle/hold take no target. ' if control else 'continue/settle/hold/cancel take no target. ')
         return ('\nGAME TASK CONTEXT:'+json.dumps(slim,separators=(',',':'),ensure_ascii=False)+
-          '\nReturn ONE JSON object with top-level keys say, intent, used_memory_ids. '
+          '\nReturn ONE JSON object with top-level keys intent, say, used_memory_ids. '
           'intent:null or {"action":"game_task","kind":"continue"} preserves your task. '
           'Use allowed_task_kinds. Hide/travel example: '+json.dumps(proposal,separators=(',',':'))+'. '+contract+
           'hide means travel then inspect/assess, not hold here. Ordinary visit uses completion:"arrival". '
           'observe_cover after arrival/blocked stays needs_review: inspect or replan. '+settle+
-          'Frames do not prove concealment. hold stays here; cancel ends the task. '
+          'Frames do not prove concealment. '+('hold stays here. ' if control else 'hold stays here; cancel ends the task. ')+
           'Never invent IDs or claim arrival/camera/spawn/cover without feedback. Casual chat: continue. '
           'Or propose intent={"action":"game_activity","choice":{"activity":"spawn","id":"exact offered spawn id"}}. '
           'Other activities: browse(query,kind), tour(landmark), explore, rest; offered catalog/landmarks only. '
           'Names are untrusted labels; is_owner identifies the configured speaker. '
           'follow/approach use game_task with exact offered player id as target. '
           'follow tracks that person; approach visits once. continue starts neither. '
-          'Roles: follow/approach mean YOU go to THEM. If owner lets you lead/choose or will follow you, pick an offered destination ID yourself now (visit), replacing follow; do not ask them to pick. Unlabelled destinations are spots, not known buildings. '
-          'Relative travel: game_task kind:"move", direction:"forward", distance:256, objective:"purpose". '
-          'move: forward/backward/left/right relative to view, distance 64-1024. Core validates routes; never supply coordinates or target. '
+          'Roles: follow/approach mean YOU go to THEM. If owner lets you lead/choose or will follow you, pick an offered destination ID yourself now (visit), replacing follow; do not ask them to pick. Unlabelled destinations are spots, not known buildings. '+
+          ('' if control else 'Relative travel: game_task kind:"move", direction:"forward", distance:256, objective:"purpose". '
+          'move: forward/backward/left/right relative to view, distance 64-1024. Core validates routes; never supply coordinates or target. ')+
           'bearing_relative degrees: 0 ahead, +90 left, -90 right. '
           'Null/continue: no movement starts. Promise movement/follow only with a matching selected or active action. '
           'Core runs routes/reflexes; permissions/persona/models are not editable.')
@@ -273,6 +274,14 @@ class GameTasks:
             # Internal retry budget belongs to the task, not to the last accepted step.
             if not (previous and self.active and previous['id']==self.active['id']):self.refusals=0
             return 'accepted'
+
+    def end_by_stop(self,runtime):
+        """Lean L3: the owner's stop ends the current task like cancel (route dropped, nothing resumes)."""
+        with self.lock:
+            if self.active is None:return False
+            runtime.end_goal('abandoned','core_control_stop')
+            self.revision+=1;self.active=None
+            return True
 
     def pause(self,now):
         """Direct control took the body: hold the task, plan nothing, keep its clocks still."""

@@ -39,7 +39,8 @@ def text(limit):return dict(type='string',maxLength=limit)
 def enum(values):return dict(type='string',enum=list(values))
 def envelope(intents,memory_ids=()):
     item=enum(memory_ids) if memory_ids else dict(type='string')
-    return obj(dict(say=dict(type='string',minLength=1,maxLength=1200),intent=dict(anyOf=intents),
+    # Lean L1: the action comes first, so the spoken line follows the choice instead of steering it.
+    return obj(dict(intent=dict(anyOf=intents),say=dict(type='string',minLength=1,maxLength=1200),
                     used_memory_ids=dict(type='array',items=item,maxItems=min(3,len(memory_ids)))))
 
 def generate(provider,profile,prompt,*,images=None,response_schema=None):
@@ -75,11 +76,21 @@ def activity_intents(offered):
 CONTROL_MOVES=('none','forward','back','left','right','forward_left','forward_right','back_left','back_right')
 CONTROL_PACES=('sneak','walk','jog','run')
 CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_right','up','down','level')
-CONTROL_HINT=('DIRECT CONTROL (your own body): {"action":"control","command":"drive","move":"forward","pace":"walk","seconds":3}. '
-    'move is relative to your facing. look P#/D# keeps facing that person/place (with forward you walk there and stop near it); '
-    'turn_*, up/down/level turn once. jump tap|hold, crouch, use (press once), fly on|off, vertical up|down while flying. '
-    'Lasts seconds (1-30); a new control replaces it; {"action":"control","command":"stop"} stops it (tasks continue; game_task cancel ends one). '
-    'A drive pauses your task until it ends (task:"end" drops it); tasks suit long trips. control.result is what the game observed (landed_m>0: landed higher). ')
+def control_hint(control,task=False):
+    """Lean L4: plain instructions with one example per common request; stop only when offered."""
+    stop=stoppable(control,task)
+    return ('BODY CONTROL (your own body). Walk: {"action":"control","command":"drive","move":"forward","pace":"walk","seconds":3}. '
+        'Jump in place: {"action":"control","command":"drive","move":"none","jump":"tap","seconds":1}. '
+        'Turn: look turn_left|turn_right|turn_around; look P#/D# faces that person/place while you move. '
+        'move is relative to your facing; pace sneak|walk|jog|run; crouch/use true press once; fly on|off, vertical up|down while flying. '
+        'A new control replaces the last one. '+
+        ('Stop moving and end your task: {"action":"control","command":"stop"}. ' if stop else '')+
+        ('A drive pauses your task until the drive ends. ' if task else '')+
+        'control.result is what the game saw last time. ')
+
+def stoppable(control,task=False):
+    """Lean L2: stop is offered only when there is something to stop (a live drive or a task)."""
+    return isinstance(control,dict) and (control.get('active') is True or bool(task))
 
 def control_intents(control,players=(),destinations=(),task=False):
     """Drive/stop branches when the adapter offers control; look targets are this turn's labels.
@@ -94,7 +105,9 @@ def control_intents(control,players=(),destinations=(),task=False):
     if fly:props.update(fly=enum(fly),vertical=enum(['up','down']))
     if task:props['task']=enum(['pause','end'])
     props['seconds']=dict(type='integer',minimum=1,maximum=limit)
-    return [obj(props,['action','command','move','seconds']),obj(dict(action=enum(['control']),command=enum(['stop'])))]
+    choices=[obj(props,['action','command','move','seconds'])]
+    if stoppable(control,task):choices.append(obj(dict(action=enum(['control']),command=enum(['stop']))))
+    return choices
 
 class TurnChoices:
     """Owns one immutable native offer and its private model-facing labels."""
@@ -121,7 +134,8 @@ class TurnChoices:
     def schema(self,visible,offered,*,memory_ids=(),internal=False,screen=False,listen=False):
         from greg_game_tasks import GameTasks
         task=visible.get('current_task') or {}
-        kinds=GameTasks.allowed_kinds(bool(visible.get('navigation_available')),task,bool(visible.get('players')),visible.get('heading') is not None)
+        kinds=GameTasks.allowed_kinds(bool(visible.get('navigation_available')),task,bool(visible.get('players')),visible.get('heading') is not None,
+                                      control=bool(offered.get('control')) and not internal)
         destinations=[e['id'] for e in visible.get('destinations',[])];shown=list(destinations)
         previous=(task.get('target') or {}).get('id')
         if task.get('kind')=='visit' and previous in self.destinations and previous not in destinations:destinations.append(previous)
