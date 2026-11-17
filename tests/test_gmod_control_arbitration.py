@@ -233,7 +233,7 @@ class Lifecycle(Base):
             with self.subTest(action=action):
                 self.assertEqual(surface.allows(action), allowed)
 
-    def shutdown(self, retired=False):
+    def shutdown(self, retired=False, fence_error=None):
         """The bridge's actual finally block and shutdown_bridge, after a tick that already wrote
         (Gordon S4-R1/R2 probes). Returns every envelope written, in order, and the hold."""
         from unittest.mock import patch
@@ -260,8 +260,15 @@ class Lifecycle(Base):
         run_bridge = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == '_run_bridge')
         final = next(n for n in ast.walk(run_bridge) if isinstance(n, ast.Try) and n.finalbody
                      and 'shutdown_bridge' in ast.unparse(n.finalbody)).finalbody
-        env = run(ast.fix_missing_locations(ast.Module(body=final[:2], type_ignores=[])),
-                  DIRECT_CONTROL=surface, tick_writer=tick, log=lambda line: None)
+        def failing_fence(*args):
+            if fence_error == 'after':
+                shutdown_fence(*args)
+            raise OSError('synthetic shutdown helper failure')
+
+        with patch('gmod_controller.shutdown_fence',
+                   side_effect=failing_fence if fence_error else shutdown_fence):
+            env = run(ast.fix_missing_locations(ast.Module(body=final[:2], type_ignores=[])),
+                      DIRECT_CONTROL=surface, tick_writer=tick, log=lambda line: None)
         self.assertIsNone(tick.pending_stop)  # nothing left queued
         call = next(n for n in ast.walk(ast.Module(body=final, type_ignores=[])) if isinstance(n, ast.Call)
                     and ast.unparse(n.func) == 'shutdown_bridge')
@@ -275,6 +282,29 @@ class Lifecycle(Base):
                                    latest=state, target=target, stop_sequence=next(seqs), session='s',
                                    capture=False, state_tail=None, stop_action=stop_action)
         return sent, sent[0]
+
+    def test_shutdown_helper_failure_preserves_final_fence(self):
+        from test_gmod_controller import DriveReceiver
+        for failure in ('before', 'after'):
+            with self.subTest(failure=failure):
+                sent, hold = self.shutdown(fence_error=failure)
+                self.assertEqual(sent[-1]['action'], dict(
+                    action='wait', ctl=7, driveGen=2, reason='bridge_shutdown'))
+                rx = DriveReceiver()
+                rx.deliver(hold, 0)
+                rx.deliver(sent[-1], .4)
+                self.assertEqual(rx.deliver(hold, .41), 'released_generation')
+                self.assertFalse(rx.active)
+
+    def test_retired_shutdown_helper_failure_never_stops_new_owner(self):
+        from test_gmod_controller import DriveReceiver
+        for failure in ('before', 'after'):
+            with self.subTest(failure=failure):
+                sent, hold = self.shutdown(retired=True, fence_error=failure)
+                self.assertEqual(len(sent), 1)
+                rx = DriveReceiver()
+                rx.deliver(dict(hold, action=dict(hold['action'], ctl=8)), 0)
+                self.assertTrue(rx.active)
 
     def test_the_final_shutdown_stop_carries_the_fence(self):
         # Gordon S4-R1: a latest-envelope reader may see only the final write. It must fence.
