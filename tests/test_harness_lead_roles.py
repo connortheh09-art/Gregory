@@ -33,7 +33,8 @@ class LeadRoles(unittest.TestCase):
   self.assertEqual(receipt['status'],'no_change')
   self.finalize();prompt=self.asked[0]['prompt']
   # Lean L5: positive wording; no example sentence to parrot.
-  self.assertIn('say so in your own words and offer to try',prompt)
+  self.assertIn('say you have not done it yet and offer to do it now; give no reason or excuse',prompt)  # L8
+  self.assertEqual(self.asked[0]['response_schema']['properties']['intent'],{'anyOf':[{'type':'null'}]})  # L8: speech only
   self.assertNotIn('UNSPOKEN_DRAFT',prompt)  # L7: the pre-outcome draft is not offered on no_change
   self.assertNotIn('I have not started moving',prompt)
   self.assertIn('You still have your game controls next turn',prompt)

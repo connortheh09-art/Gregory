@@ -90,6 +90,7 @@ class Contract(World):
         self.assertIn('"look":"turn_right","pace":"run"', idle)  # L6: run + turn example
         self.assertNotIn('"command":"stop"', idle)
         self.assertIn('"command":"stop"', busy)
+        self.assertIn('When asked to stop, halt or stay put', busy)  # L8
         self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
 
     def test_drive_must_choose_look_pace_and_jump(self):

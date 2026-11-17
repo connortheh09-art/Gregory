@@ -50,6 +50,15 @@ def bounded(value, limit=16384):
     return json.loads(encoded)
 
 
+def _call_kind(body):
+    """decision, or speech (finalization: no schema, or one whose intent can only be null)."""
+    try:
+        intent = body['response_format']['json_schema']['schema']['properties']['intent']
+    except (KeyError, TypeError):
+        return 'speech'
+    return 'speech' if intent == {'anyOf': [{'type': 'null'}]} else 'decision'
+
+
 def capture_model_call(body, attempt, started, *, response=None, error=None):
     """Diagnostic D1 at the provider boundary (opt-in, local only, never raises).
 
@@ -76,7 +85,7 @@ def capture_model_call(body, attempt, started, *, response=None, error=None):
         user = next((m['content'] for m in body.get('messages', []) if m.get('role') == 'user'), '')
         text = user if isinstance(user, str) else next((c.get('text', '') for c in user if c.get('type') == 'text'), '')
         row = dict(t=time.time(), seconds=round(time.perf_counter() - started, 3), attempt=attempt,
-                   kind='decision' if 'response_format' in body else 'speech',
+                   kind=_call_kind(body),
                    prompt_sha256=hashlib.sha256(text.encode()).hexdigest(),
                    body=dict({k: v for k, v in body.items() if k != 'messages'}, messages=messages))
         if response is not None:

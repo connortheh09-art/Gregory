@@ -85,7 +85,7 @@ def control_hint(control,task=False):
         'look: ahead keeps your facing; turn_left|turn_right|turn_around turn once; P#/D# faces that person/place while you move. '
         'pace sneak|walk|jog|run (run when asked to run); crouch/use true press once; fly on|off, vertical up|down while flying. '
         'A new control replaces the last one. '+
-        ('Stop moving and end your task: {"action":"control","command":"stop"}. ' if stop else '')+
+        ('When asked to stop, halt or stay put, stop moving and end your task: {"action":"control","command":"stop"}. ' if stop else '')+
         ('A drive pauses your task until the drive ends. ' if task else '')+
         'control.result is what the game saw last time. ')
 
