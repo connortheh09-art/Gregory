@@ -33,17 +33,18 @@ class LeadRoles(unittest.TestCase):
   self.assertEqual(receipt['status'],'no_change')
   self.finalize();prompt=self.asked[0]['prompt']
   # Lean L5: positive wording; no example sentence to parrot.
-  self.assertIn('say plainly you did not do it and offer to try',prompt)
+  self.assertIn('say so in your own words and offer to try',prompt)
+  self.assertNotIn('UNSPOKEN_DRAFT',prompt)  # L7: the pre-outcome draft is not offered on no_change
   self.assertNotIn('I have not started moving',prompt)
   self.assertIn('You still have your game controls next turn',prompt)
   self.assertIn('This reply is speech only',prompt)
  def test_no_image_draft_cannot_invent_visible_suggestions(self):
   self.publish();self.finalize()
-  self.assertIn('You have no image this turn: talk about what you know, not what you see',self.asked[0]['prompt'])
+  self.assertIn('You have no image this turn: describe nothing you would have to see',self.asked[0]['prompt'])
  def test_ready_image_preserves_grounded_vision_instead_of_denial(self):
   self.row['screen_observations']=[dict(status='ready')]
   self.publish();self.finalize()
-  self.assertIn('Mention only what the image shows',self.asked[0]['prompt'])
+  self.assertIn('Keep only what the draft said about the image',self.asked[0]['prompt'])
   self.assertNotIn('You have no image this turn',self.asked[0]['prompt'])
  def test_guidance_adds_no_new_task_kinds_or_parser(self):
   kinds=GameTasks.allowed_kinds(True,None,True,True)

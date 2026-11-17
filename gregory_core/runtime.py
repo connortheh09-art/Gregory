@@ -50,6 +50,45 @@ def bounded(value, limit=16384):
     return json.loads(encoded)
 
 
+def capture_model_call(body, attempt, started, *, response=None, error=None):
+    """Diagnostic D1 at the provider boundary (opt-in, local only, never raises).
+
+    GREG_MODEL_CAPTURE=<path.jsonl> records every model request this provider sends (decision and
+    finalization): the full body with system prompt and schema (images replaced by sha256/length),
+    HTTP status, raw reply text or error body (bounded), and the user-prompt sha256 that joins it to
+    the bridge-side GREG_DECISION_CAPTURE row (screen turns append text to the prompt: join those by
+    prefix on the stored user text). Capped at 200 MB.
+    """
+    path = os.environ.get('GREG_MODEL_CAPTURE')
+    if not path:
+        return
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > 200 * 2**20:
+            return
+        messages = []
+        for m in body.get('messages', []):
+            content = m.get('content')
+            if isinstance(content, list):
+                content = [dict(type='image', sha256=hashlib.sha256(str(c.get('image_url', {}).get('url', '')).encode()).hexdigest(),
+                                chars=len(str(c.get('image_url', {}).get('url', ''))))
+                           if c.get('type') == 'image_url' else c for c in content]
+            messages.append(dict(role=m.get('role'), content=content))
+        user = next((m['content'] for m in body.get('messages', []) if m.get('role') == 'user'), '')
+        text = user if isinstance(user, str) else next((c.get('text', '') for c in user if c.get('type') == 'text'), '')
+        row = dict(t=time.time(), seconds=round(time.perf_counter() - started, 3), attempt=attempt,
+                   kind='decision' if 'response_format' in body else 'speech',
+                   prompt_sha256=hashlib.sha256(text.encode()).hexdigest(),
+                   body=dict({k: v for k, v in body.items() if k != 'messages'}, messages=messages))
+        if response is not None:
+            row.update(status=getattr(response, 'status_code', None), reply=str(getattr(response, 'text', ''))[:16384])
+        if error is not None:
+            row['error'] = error
+        with open(path, 'a', encoding='utf8') as f:
+            f.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
+    except Exception:
+        pass
+
+
 class LMStudioProvider:
     """Opt-in seam using the existing local-model budget; never starts a service."""
     name = 'lm-studio'
@@ -100,7 +139,13 @@ class LMStudioProvider:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ProviderReplyError('provider_reply_deadline')
-            response = post_chat(self.endpoint, json=body, timeout=remaining)
+            started = time.perf_counter()  # not monotonic(): the deadline tests script that clock
+            try:
+                response = post_chat(self.endpoint, json=body, timeout=remaining)
+            except Exception as exc:
+                capture_model_call(body, attempt, started, error=type(exc).__name__ + ': ' + str(exc)[:500])
+                raise
+            capture_model_call(body, attempt, started, response=response)
             response.raise_for_status()
             # Read final content only. Reasoning is not a speech fallback.
             try:
