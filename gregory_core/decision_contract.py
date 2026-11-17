@@ -79,10 +79,11 @@ CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_righ
 def control_hint(control,task=False):
     """Lean L4: plain instructions with one example per common request; stop only when offered."""
     stop=stoppable(control,task)
-    return ('BODY CONTROL (your own body). Walk: {"action":"control","command":"drive","move":"forward","pace":"walk","seconds":3}. '
-        'Jump in place: {"action":"control","command":"drive","move":"none","jump":"tap","seconds":1}. '
-        'Turn: look turn_left|turn_right|turn_around; look P#/D# faces that person/place while you move. '
-        'move is relative to your facing; pace sneak|walk|jog|run; crouch/use true press once; fly on|off, vertical up|down while flying. '
+    return ('BODY CONTROL (your own body). Walk: {"action":"control","command":"drive","move":"forward","look":"ahead","pace":"walk","jump":"none","seconds":3}. '
+        'Jump in place: {"action":"control","command":"drive","move":"none","look":"ahead","pace":"walk","jump":"tap","seconds":1}. '
+        'Turn right and run: {"action":"control","command":"drive","move":"forward","look":"turn_right","pace":"run","jump":"none","seconds":3}. '
+        'look: ahead keeps your facing; turn_left|turn_right|turn_around turn once; P#/D# faces that person/place while you move. '
+        'pace sneak|walk|jog|run (run when asked to run); crouch/use true press once; fly on|off, vertical up|down while flying. '
         'A new control replaces the last one. '+
         ('Stop moving and end your task: {"action":"control","command":"stop"}. ' if stop else '')+
         ('A drive pauses your task until the drive ends. ' if task else '')+
@@ -98,14 +99,16 @@ def control_intents(control,players=(),destinations=(),task=False):
     if not isinstance(control,dict):return []
     limit=control.get('max_seconds')
     limit=limit if type(limit) is int and 1<=limit<=30 else 30
-    props=dict(action=enum(['control']),command=enum(['drive']),move=enum(CONTROL_MOVES),pace=enum(CONTROL_PACES),
-               look=enum([*players,*destinations,*CONTROL_TURNS]),jump=enum(['none','tap','hold']),
-               crouch=dict(type='boolean'),use=dict(type='boolean'))
+    # Lean L6: move, look, pace and jump are required, in that order. Constrained decoding emits the
+    # required keys and Gemma stopped there (0019 replay: run/turn dropped 20/20); now each is a choice.
+    props=dict(action=enum(['control']),command=enum(['drive']),move=enum(CONTROL_MOVES),
+               look=enum(['ahead',*CONTROL_TURNS,*players,*destinations]),pace=enum(CONTROL_PACES),
+               jump=enum(['none','tap','hold']),crouch=dict(type='boolean'),use=dict(type='boolean'))
     fly=[v for v in ('on','off') if v in (control.get('fly') or ())]
     if fly:props.update(fly=enum(fly),vertical=enum(['up','down']))
     if task:props['task']=enum(['pause','end'])
     props['seconds']=dict(type='integer',minimum=1,maximum=limit)
-    choices=[obj(props,['action','command','move','seconds'])]
+    choices=[obj(props,['action','command','move','look','pace','jump','seconds'])]
     if stoppable(control,task):choices.append(obj(dict(action=enum(['control']),command=enum(['stop']))))
     return choices
 
@@ -176,7 +179,8 @@ class TurnChoices:
         result=deepcopy(intent)
         if isinstance(result,dict) and result.get('action')=='control':
             look=result.get('look')
-            if look in self.players:result['look']=dict(player=self.players[look])
+            if look=='ahead':result.pop('look')  # keep facing
+            elif look in self.players:result['look']=dict(player=self.players[look])
             elif look in self.destinations:result['look']=dict(destination=self.destinations[look])
             return result
         if not isinstance(result,dict) or result.get('action')!='game_task':return result

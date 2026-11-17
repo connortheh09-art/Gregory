@@ -35,7 +35,7 @@ OFFER = dict(mode='walk', active=False, seconds_left=0, max_seconds=30, fly=['on
 
 
 def drive(**fields):
-    return dict(action='control', command='drive', **{'move': 'forward', 'seconds': 3, **fields})
+    return dict(action='control', command='drive', **{'move': 'forward', 'look': 'ahead', 'pace': 'walk', 'jump': 'none', 'seconds': 3, **fields})
 
 
 class World(unittest.TestCase):
@@ -86,10 +86,20 @@ class Contract(World):
         # Lean L4: a jump example, and stop explained only when it is offered.
         from gregory_core.decision_contract import control_hint
         idle, busy = control_hint(OFFER), control_hint(OFFER, task=True)
-        self.assertIn('"move":"none","jump":"tap"', idle)
+        self.assertIn('"move":"none","look":"ahead","pace":"walk","jump":"tap"', idle)
+        self.assertIn('"look":"turn_right","pace":"run"', idle)  # L6: run + turn example
         self.assertNotIn('"command":"stop"', idle)
         self.assertIn('"command":"stop"', busy)
         self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
+
+    def test_drive_must_choose_look_pace_and_jump(self):
+        # Lean L6: no silent defaults for the modifiers Gemma dropped (0019 replay: run/turn 0/20).
+        c, s = self.contract()
+        for missing in ('look', 'pace', 'jump'):
+            intent = drive(); intent.pop(missing)
+            with self.subTest(missing=missing), self.assertRaises(SchemaViolation):
+                c.decode(intent, s)
+        self.assertNotIn('look', c.decode(drive(look='ahead'), s))  # ahead = keep facing
 
     def test_stop_is_offered_only_with_something_to_stop(self):
         # Lean L2: idle with no task, stop is not on the menu (the real-VC no-op stops).
@@ -449,7 +459,7 @@ class Publication(World):
         offered = dict(binding=self.binding, control=surface.offer(self.state))
         c = TurnChoices(self.native)
         schema = c.schema(c.view, offered)
-        intent = c.decode(dict(action='control', command='drive', move='forward', pace='run', look='P1', seconds=5), schema)
+        intent = c.decode(dict(action='control', command='drive', move='forward', pace='run', look='P1', jump='none', seconds=5), schema)
         row, _, _ = self.publish(intent, control=surface, offer=offered, view=self.native)
         self.assertEqual(row['task_outcome']['verdict'], 'accepted')
         hold = box.actions('drive')[-1]

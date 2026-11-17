@@ -350,6 +350,8 @@ def translate(intent, view, state, player=lambda alias, state: None):
     params = dict(forward=move[0], right=move[1], speed=speed, jump=intent.get('jump', 'none'),
                   crouch=intent.get('crouch', False), use=intent.get('use', False))
     look = intent.get('look')
+    if look == 'ahead':  # lean L6: an explicit 'keep facing' (decode normally drops it)
+        look = None
     if isinstance(look, dict) and set(look) == {'player'}:
         steamid = player(look['player'], state)
         if steamid is None:
