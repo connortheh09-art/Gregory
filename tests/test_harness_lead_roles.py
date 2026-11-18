@@ -36,6 +36,7 @@ class LeadRoles(unittest.TestCase):
   self.assertIn('say you have not done it yet and offer to do it now; give no reason or excuse',prompt)  # L8
   self.assertEqual(self.asked[0]['response_schema']['properties']['intent'],{'anyOf':[{'type':'null'}]})  # L8: speech only
   self.assertNotIn('UNSPOKEN_DRAFT',prompt)  # L7: the pre-outcome draft is not offered on no_change
+  self.assertNotIn('go along with it',prompt);self.assertNotIn('It did not work',prompt)  # L9: only this status's rule
   self.assertNotIn('I have not started moving',prompt)
   self.assertIn('You still have your game controls next turn',prompt)
   self.assertIn('This reply is speech only',prompt)
