@@ -51,6 +51,7 @@ class ReceiptWording(unittest.TestCase):
   self.assertNotIn('unoffered destination',prompt)
   self.assertEqual(receipt['reason'],'unoffered destination')
   self.assertIn('giving only receipt.explanation as the reason',prompt)
+  self.assertNotIn('go along with it',prompt)  # L9
  def test_accepted_and_no_change_receipts_have_no_refusal_explanation(self):
   self.publish();self.assertIsNone(self.lane.queue[0]['execution_receipt']['explanation'])
   self.lane.queue.clear();self.lane.turn_ledger.clear()
@@ -63,7 +64,8 @@ class ReceiptWording(unittest.TestCase):
   self.publish();self.finalize();prompt=self.asked[0]['prompt']
   self.assertIn('lead the way',prompt);self.assertIn('Talk like a person, not a system',prompt)
   # Pre-existing honesty contracts survive the lean wording (L5), stated positively.
-  for clause in ('you have not seen the result yet','You still have your game controls next turn',
+  self.assertNotIn('you have not done it yet',prompt);self.assertNotIn('It did not work',prompt)  # L9: no other status's rule
+  for clause in ('You have not seen the result yet','You still have your game controls next turn',
                  'invent no places, objects or obstacles','This reply is speech only'):
    self.assertIn(clause,prompt)
 
