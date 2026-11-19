@@ -1131,7 +1131,14 @@ def actionable(state: dict | None, now: float) -> bool:
                 and isinstance(state.get("controlEpoch"), (int, float)))
 
 
-def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log, now: float = 0.) -> dict:
+def route_offer(offer, runtime):
+    """0023: mark a running autonomous route so the model is offered stop (contract stoppable())."""
+    if offer is not None and runtime is not None and runtime.goals.active:
+        offer = dict(offer, route=True)
+    return offer
+
+
+def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authority, log, now: float = 0., agenda=None) -> dict:
     """Core's direct-control decision, applied once at publication (docs/GMOD_CONTROLLER.md).
 
     The latest decision wins. A drive pauses the current game task until direct control ends,
@@ -1151,6 +1158,13 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
         detail = control.apply(intent, row.get('game_task_view'), latest)
         if command == 'stop' and game_tasks is not None and runtime is not None and game_tasks.end_by_stop(runtime):
             detail = dict(detail, noop=False, task='ended')  # lean L3: one stop for body and task
+        if command == 'stop' and runtime is not None and runtime.goals.active:
+            # 0023: an autonomous route (explore/tour) is neither a drive nor a task; stop ends it
+            # too, and the agenda waits instead of choosing the next activity at once.
+            runtime.end_goal('abandoned', 'core_control_stop')
+            if agenda is not None:
+                agenda.hold(now)
+            detail = dict(detail, noop=False, route='ended')
     except ValueError as exc:
         reason = str(exc)[:160]
         if authority is not None:
@@ -2004,7 +2018,7 @@ def _run_bridge(a, ap, capture_gate=None):
                 game_authority.observe(latest,CATALOG.observations(latest),PLAYERCORE.memory.recent_events(latest.get('map',''),4))
                 game_authority.offer(latest,CATALOG,PLAYERCORE.memory.landmarks(latest.get('map','')),
                     ((game_tasks.snapshot() or {}).get('navigation_available',False) if game_tasks else latest.get('map')==PLAYERCORE.graph.map),now,
-                    control=DIRECT_CONTROL.offer(latest) if DIRECT_CONTROL is not None else None)
+                    control=route_offer(DIRECT_CONTROL.offer(latest),PLAYERCORE) if DIRECT_CONTROL is not None else None)
             if game_screen is not None and supervised is not None and not supervised_draining:
                 supervised.consider_game_feedback()
             if supervised is not None:
@@ -2178,7 +2192,7 @@ def _run_bridge(a, ap, capture_gate=None):
                         current=bool((row['request'].get('voice_metadata') or row['request'].get('game_attention')) and voice_session is not None
                                 and stamp==voice_session.stamp())
                         if current and row['game_intent'].get('action')=='control':
-                            row=apply_control(row,latest,DIRECT_CONTROL,game_tasks,PLAYERCORE,game_authority,log,now)
+                            row=apply_control(row,latest,DIRECT_CONTROL,game_tasks,PLAYERCORE,game_authority,log,now,agenda)
                             if row['task_outcome']['verdict']=='accepted':
                                 tracker.decision_result(trace,accepted=True,reason='core_conversation_control',
                                     parsed_summary=dict(kind=row['task_outcome']['kind']),activate=False)

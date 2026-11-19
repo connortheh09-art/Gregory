@@ -62,7 +62,8 @@ class ReceiptWording(unittest.TestCase):
  def test_accept_guidance_is_conversational_and_keeps_existing_guards(self):
   self.row['game_intent']=dict(action='game_task',kind='visit',target=self.target)
   self.publish();self.finalize();prompt=self.asked[0]['prompt']
-  self.assertIn('lead the way',prompt);self.assertIn('Talk like a person, not a system',prompt)
+  self.assertIn('go along with it like a person would',prompt);self.assertIn('Talk like a person, not a system',prompt)
+  self.assertNotIn('lead the way',prompt)  # 0023: no quoted sentence to copy (0022 replay: 4/6 copied it)
   # Pre-existing honesty contracts survive the lean wording (L5), stated positively.
   self.assertNotIn('you have not done it yet',prompt);self.assertNotIn('It did not work',prompt)  # L9: no other status's rule
   for clause in ('You have not seen the result yet','You still have your game controls next turn',

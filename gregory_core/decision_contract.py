@@ -77,11 +77,16 @@ CONTROL_MOVES=('none','forward','back','left','right','forward_left','forward_ri
 CONTROL_PACES=('sneak','walk','jog','run')
 CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_right','up','down','level')
 def control_hint(control,task=False):
-    """Lean L4: plain instructions with one example per common request; stop only when offered."""
+    """Lean L4: plain instructions with one example per common request; stop only when offered.
+    0023: examples as a short list with walk not first, plus a back example and a talk-only one
+    (live 0022: chat/screen/back requests copied the walk example)."""
     stop=stoppable(control,task)
-    return ('BODY CONTROL (your own body). Walk: {"action":"control","command":"drive","move":"forward","look":"ahead","pace":"walk","jump":"none","seconds":3}. '
-        'Jump in place: {"action":"control","command":"drive","move":"none","look":"ahead","pace":"walk","jump":"tap","seconds":1}. '
-        'Turn right and run: {"action":"control","command":"drive","move":"forward","look":"turn_right","pace":"run","jump":"none","seconds":3}. '
+    return ('BODY CONTROL (your own body). Examples: '
+        '- Just talking, answering or looking at something: intent null. '
+        '- Jump in place: {"action":"control","command":"drive","move":"none","look":"ahead","pace":"walk","jump":"tap","seconds":1}. '
+        '- Back up: {"action":"control","command":"drive","move":"back","look":"ahead","pace":"walk","jump":"none","seconds":2}. '
+        '- Turn right and run: {"action":"control","command":"drive","move":"forward","look":"turn_right","pace":"run","jump":"none","seconds":3}. '
+        '- Walk forward: {"action":"control","command":"drive","move":"forward","look":"ahead","pace":"walk","jump":"none","seconds":3}. '
         'look: ahead keeps your facing; turn_left|turn_right|turn_around turn once; P#/D# faces that person/place while you move. '
         'pace sneak|walk|jog|run (run when asked to run); crouch/use true press once; fly on|off, vertical up|down while flying. '
         'A new control replaces the last one. '+
@@ -90,8 +95,9 @@ def control_hint(control,task=False):
         'control.result is what the game saw last time. ')
 
 def stoppable(control,task=False):
-    """Lean L2: stop is offered only when there is something to stop (a live drive or a task)."""
-    return isinstance(control,dict) and (control.get('active') is True or bool(task))
+    """Lean L2: stop is offered only when there is something to stop (a live drive, a task, or
+    0023: an autonomous route such as explore/tour, which is neither)."""
+    return isinstance(control,dict) and (control.get('active') is True or control.get('route') is True or bool(task))
 
 def control_intents(control,players=(),destinations=(),task=False):
     """Drive/stop branches when the adapter offers control; look targets are this turn's labels.

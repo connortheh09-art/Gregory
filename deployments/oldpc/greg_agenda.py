@@ -24,6 +24,9 @@ class Agenda:
             count+=1
         return count<self.max_autonomous_rests
 
+    def hold(self,now,seconds=60):
+        """0023: the owner said stop. Do not pick a new activity right away."""
+        self.next_at=max(self.next_at,now+seconds);self.reconsider_at=max(self.reconsider_at,now+seconds)
     def defer_core(self,now,*,decision_failure=True):
         # Busy voice is not a bad model response. Repeated invalid output gets
         # bounded exponential backoff, not an inference loop every 15 seconds.

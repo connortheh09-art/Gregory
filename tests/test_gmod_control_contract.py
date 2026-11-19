@@ -92,6 +92,12 @@ class Contract(World):
         self.assertIn('"command":"stop"', busy)
         self.assertIn('When asked to stop, halt or stay put', busy)  # L8
         self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
+        # 0023: a talk-only example (intent null) and a back example, with walk listed last.
+        self.assertIn('intent null', idle)
+        self.assertIn('"move":"back"', idle)
+        self.assertLess(idle.index('"move":"none"'), idle.index('"move":"forward","look":"ahead"'))
+        # 0023: a running autonomous route (explore/tour) is something to stop.
+        self.assertIn('"command":"stop"', control_hint(dict(OFFER, route=True)))
 
     def test_drive_must_choose_look_pace_and_jump(self):
         # Lean L6: no silent defaults for the modifiers Gemma dropped (0019 replay: run/turn 0/20).
@@ -425,6 +431,28 @@ class Publication(World):
                 self.assertEqual((self.link.active, self.link.refusals, self.link.last_refusal, ended), (task, 0, None, []))
                 self.assertEqual(authority.events[-1]['kind'], 'control_refused')
 
+    def test_stop_ends_an_autonomous_route_and_holds_the_agenda(self):
+        # 0023 (live 0022 FAIL 2): explore/tour is neither a drive nor a task, so stop was never offered.
+        import gmod_bridge as bridge
+        self.assertNotIn('route', bridge.route_offer(dict(OFFER), self.runtime))
+        self.runtime.goals.start('explore', 'agenda', self.state, 1)
+        self.assertIs(bridge.route_offer(dict(OFFER), self.runtime)['route'], True)
+        c = TurnChoices(self.native)
+        s = c.schema(c.view, dict(binding=self.binding, control=dict(OFFER, route=True)))
+        stop = dict(action='control', command='stop')
+        self.assertEqual(c.decode(stop, s), stop)
+        surface, controller, box = self.surface()
+        from unittest.mock import patch
+        held = []
+        with patch.object(Agenda, 'hold', lambda agenda, now, seconds=60: held.append(now)):
+            row, _, ended = self.publish(stop, control=surface, offer={})
+        self.assertEqual((row['task_outcome']['verdict'], row['task_outcome'].get('route')), ('accepted', 'ended'))
+        self.assertEqual((ended, held), ([('abandoned', 'core_control_stop')], [2]))
+        agenda = Agenda(None, 'unused', 'unused')
+        agenda.hold(10)
+        self.assertEqual((agenda.next_at, agenda.reconsider_at), (70, 70))
+        self.assertEqual(box.actions(), [])  # nothing of his held: no release that would cancel Lua routes
+
     def test_a_refused_stop_is_not_reported_as_a_refused_move(self):
         row, _, _ = self.publish(dict(action='control', command='stop'), control=None, offer={})
         self.assertEqual((row['task_outcome']['kind'], row['say']), ('control_stop', "I couldn't stop just now."))
@@ -453,7 +481,7 @@ class Publication(World):
         tree = ast.parse((ROOT / 'deployments/oldpc/gmod_bridge.py').read_text())
         call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'game_authority.offer')
         self.assertEqual([ast.unparse(k.value) for k in call.keywords if k.arg == 'control'],
-                         ['DIRECT_CONTROL.offer(latest) if DIRECT_CONTROL is not None else None'])
+                         ['route_offer(DIRECT_CONTROL.offer(latest), PLAYERCORE) if DIRECT_CONTROL is not None else None'])  # 0023
 
     def test_owner_turn_reaches_the_wire_as_one_tracked_hold(self):
         surface, controller, box = self.surface()
