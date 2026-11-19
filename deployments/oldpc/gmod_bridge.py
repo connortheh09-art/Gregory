@@ -2391,6 +2391,15 @@ def _run_bridge(a, ap, capture_gate=None):
     finally:
         shutdown_stop=dict(stop_action=None,stop=True)
         if DIRECT_CONTROL is not None:
+            # Keep a safe final mailbox plan even if disconnect/publication raises.
+            # Only the genuinely legacy (no-controller) path may use a plain wait.
+            # The bridge owns this lifecycle; disconnect advances this generation once.
+            shutdown_core = DIRECT_CONTROL.controller
+            shutdown_stop = dict(stop=False, stop_action=None)
+            if not shutdown_core.retired and shutdown_core.controller is not None:
+                shutdown_stop = dict(stop=True, stop_action=dict(
+                    action='wait', ctl=shutdown_core.controller,
+                    driveGen=shutdown_core.generation + 1, reason='bridge_shutdown'))
             try:
                 from gmod_controller import shutdown_fence
                 shutdown_stop=shutdown_fence(DIRECT_CONTROL, tick_writer)  # the final stop carries the fence
