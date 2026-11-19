@@ -176,6 +176,10 @@ function M.step(cmd, lp, now, dt)
     if not H then held = {} return false end
     dt = clamp(dt or .015, .001, .1)
     local p, out = H.p, {}
+    -- One-shot presses (jump tap, hold re-press, use) are spent only on a command the server
+    -- receives. CreateMove also runs for local-only commands (CommandNumber 0) at high FPS; a
+    -- press spent there never reaches the server (live 0022: jump 'done', 0 air phases).
+    local sent = cmd:CommandNumber() ~= 0
     for _, k in ipairs(OWNED) do cmd:RemoveKey(k) end
     cmd:ClearMovement()
     local flying = lp:GetMoveType() == MOVETYPE_NOCLIP
@@ -211,18 +215,18 @@ function M.step(cmd, lp, now, dt)
         if H.tapDue then
             if now > H.tapDue then -- deadline first: a late grounded command must not jump
                 H.tapDue, H.jump = nil, "missed"
-            elseif lp:OnGround() then
+            elseif sent and lp:OnGround() then
                 cmd:AddKey(IN_JUMP) out[#out + 1] = "jump"
                 H.tapDue, H.jump = nil, "done"
             end
-        elseif p.jump == "hold" then
+        elseif p.jump == "hold" and sent then
             -- Source ignores a jump held from the last command (no pogo), so re-press on each
             -- landing to keep jumping. VERIFY live.
             if lp:OnGround() and not H.pressed then cmd:AddKey(IN_JUMP) out[#out + 1] = "jump" end
             H.pressed = lp:OnGround() and not H.pressed
         end
     end
-    if H.useDue then cmd:AddKey(IN_USE) out[#out + 1] = "use" H.useDue = nil end
+    if H.useDue and sent then cmd:AddKey(IN_USE) out[#out + 1] = "use" H.useDue = nil end
     -- blocked: wishing to move but slower than 20% of the target for over 0.5s.
     local actual = lp:GetVelocity():Length2D()
     if target > 0 and actual < .2 * target then
