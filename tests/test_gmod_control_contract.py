@@ -95,8 +95,12 @@ class Contract(World):
         self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
         # 0023: a talk-only example (intent null) and a back example, with walk after the others.
         self.assertIn('intent null', idle)
-        # 0025: the talk-only line is last and does not claim looking (screen checks went null).
-        self.assertGreater(idle.index('intent null'), idle.index('"move":"forward","look":"ahead"'))
+        # 0025: the talk-only line does not claim looking (screen checks went null).
+        # 0026: it comes before the moves (last, it was copied for back/jump/walk) and after stop,
+        # and the hint ends with the rule that a promised action is not null.
+        self.assertLess(idle.index('intent null'), idle.index('"jump":"tap"'))
+        self.assertLess(busy.index('"command":"stop"'), busy.index('intent null'))
+        self.assertTrue(idle.rstrip().endswith('the intent must be that action, never null.'))
         self.assertNotIn('looking', idle)
         self.assertIn('"move":"back"', idle)
         self.assertLess(idle.index('"move":"none"'), idle.index('"move":"forward","look":"ahead"'))

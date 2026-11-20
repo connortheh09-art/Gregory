@@ -82,20 +82,24 @@ def control_hint(control,task=False):
     (live 0022: chat/screen/back requests copied the walk example).
     0025: stop is the first example when offered, with the owner's real phrasings (replay: stop
     1/9, null chosen for cancel/stand still); the talk-only line goes last and no longer says
-    'looking' (replay: explicit screen check 3/3 -> 0/3 null)."""
+    'looking' (replay: explicit screen check 3/3 -> 0/3 null).
+    0026: the talk-only line moves back up, right after stop (replay 0025: with it last, back 3/3 -> 0/3
+    and jump/walk went null while say promised the move; whichever example is last gets copied). The
+    idle order is 0023's again. A closing rule ties say to intent: a promised action is not null."""
     stop=stoppable(control,task)
     return ('BODY CONTROL (your own body). Examples: '+
         ('- Stop, stand still, cancel that, or stop what you are doing (ends your task too): {"action":"control","command":"stop"}. ' if stop else '')+
+        '- Only chatting or answering, with no request to move: intent null. '
         '- Jump in place: {"action":"control","command":"drive","move":"none","look":"ahead","pace":"walk","jump":"tap","seconds":1}. '
         '- Back up: {"action":"control","command":"drive","move":"back","look":"ahead","pace":"walk","jump":"none","seconds":2}. '
         '- Turn right and run: {"action":"control","command":"drive","move":"forward","look":"turn_right","pace":"run","jump":"none","seconds":3}. '
         '- Walk forward: {"action":"control","command":"drive","move":"forward","look":"ahead","pace":"walk","jump":"none","seconds":3}. '
-        '- Only chatting or answering, with no request to move: intent null. '
         'look: ahead keeps your facing; turn_left|turn_right|turn_around turn once; P#/D# faces that person/place while you move. '
         'pace sneak|walk|jog|run (run when asked to run); crouch/use true press once; fly on|off, vertical up|down while flying. '
         'A new control replaces the last one. '+
         ('A drive pauses your task until the drive ends. ' if task else '')+
-        'control.result is what the game saw last time. ')
+        'control.result is what the game saw last time. '
+        'If your say promises something you do now (move, jump, turn, stop, look at your screen), the intent must be that action, never null. ')
 
 def stoppable(control,task=False):
     """Lean L2: stop is offered only when there is something to stop (a live drive, a task, or
