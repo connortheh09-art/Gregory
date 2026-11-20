@@ -337,7 +337,7 @@ class SupervisedLane:
             'The draft below was never spoken; keep its conversation if it fits the receipt. ')
         # L9: only the rule for this receipt's status (0021 replay: the no_change wording leaked into
         # accepted replies, "I haven't done it yet, but I can jump now").
-        rule={'accepted':'It started: go along with it like a person would. You have not seen the result yet, so do not say it worked. ',
+        rule={'accepted':'The game accepted it and it is just starting. You have not seen the result yet: speak of it as starting now, never as done or as how things already are. ',
               'refused':'It did not work: say so, giving only receipt.explanation as the reason, in your own words; do not guess other causes or options. ',
               }.get(status,'Nothing new started this turn. If they asked for an action, say you have not done it yet and offer to do it now; give no reason or excuse. ')
         prompt=('VOICE REPLY: Say one or two natural sentences to the owner, as Gregory, based on what actually happened (EXECUTION_RECEIPT). '

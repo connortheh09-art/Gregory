@@ -90,10 +90,14 @@ class Contract(World):
         self.assertIn('"look":"turn_right","pace":"run"', idle)  # L6: run + turn example
         self.assertNotIn('"command":"stop"', idle)
         self.assertIn('"command":"stop"', busy)
-        self.assertIn('When asked to stop, halt or stay put', busy)  # L8
+        self.assertIn('Stop, stand still, cancel that, or stop what you are doing', busy)  # L8, 0025 phrasings
+        self.assertLess(busy.index('"command":"stop"'), busy.index('"jump":"tap"'))  # 0025: stop listed first
         self.assertIn('"command":"stop"', control_hint(dict(OFFER, active=True)))
-        # 0023: a talk-only example (intent null) and a back example, with walk listed last.
+        # 0023: a talk-only example (intent null) and a back example, with walk after the others.
         self.assertIn('intent null', idle)
+        # 0025: the talk-only line is last and does not claim looking (screen checks went null).
+        self.assertGreater(idle.index('intent null'), idle.index('"move":"forward","look":"ahead"'))
+        self.assertNotIn('looking', idle)
         self.assertIn('"move":"back"', idle)
         self.assertLess(idle.index('"move":"none"'), idle.index('"move":"forward","look":"ahead"'))
         # 0023: a running autonomous route (explore/tour) is something to stop.
@@ -452,6 +456,37 @@ class Publication(World):
         agenda.hold(10)
         self.assertEqual((agenda.next_at, agenda.reconsider_at), (70, 70))
         self.assertEqual(box.actions(), [])  # nothing of his held: no release that would cancel Lua routes
+
+    def test_every_effective_stop_holds_the_agenda_with_the_real_end_goal(self):
+        # 0025 (Gordon 0023 review): with the real Runtime.end_goal a task stop cleared the goal before
+        # the route branch, so only route stops held the agenda. Now drive, task and route stops all do.
+        import gmod_bridge as bridge
+        stop = dict(action='control', command='stop')
+        def apply(control):
+            agenda = Agenda(None, 'unused', 'unused')
+            row = dict(request=dict(), say='Okay.', game_intent=stop, game_task_view=self.link.snapshot(), activity_options={})
+            out = bridge.apply_control(row, self.state, control, self.link, self.runtime, None, lambda *a: None, 2, agenda)
+            return out['task_outcome'], (agenda.next_at, agenda.reconsider_at)
+        for path in ('task', 'route', 'drive', 'nothing'):
+            with self.subTest(path=path):
+                self.setUp()
+                surface = self.surface()[0]
+                if path == 'task':
+                    self.follow()
+                    if not self.runtime.goals.active:
+                        self.runtime.goals.start('follow', 'task', self.state, 1)
+                elif path == 'route':
+                    self.runtime.goals.start('explore', 'agenda', self.state, 1)
+                elif path == 'drive':
+                    surface.apply(drive(), self.native, self.state)
+                outcome, timers = apply(surface)
+                if path == 'nothing':
+                    self.assertEqual((outcome['verdict'], timers), ('unchanged', (0., 0.)))
+                else:
+                    self.assertEqual((outcome['verdict'], timers), ('accepted', (62, 62)))
+                    self.assertIsNone(self.runtime.goals.active)
+                if path == 'task':
+                    self.assertEqual((outcome.get('task'), self.link.active), ('ended', None))
 
     def test_a_refused_stop_is_not_reported_as_a_refused_move(self):
         row, _, _ = self.publish(dict(action='control', command='stop'), control=None, offer={})

@@ -1159,11 +1159,8 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
         if command == 'stop' and game_tasks is not None and runtime is not None and game_tasks.end_by_stop(runtime):
             detail = dict(detail, noop=False, task='ended')  # lean L3: one stop for body and task
         if command == 'stop' and runtime is not None and runtime.goals.active:
-            # 0023: an autonomous route (explore/tour) is neither a drive nor a task; stop ends it
-            # too, and the agenda waits instead of choosing the next activity at once.
+            # 0023: an autonomous route (explore/tour) is neither a drive nor a task; stop ends it too.
             runtime.end_goal('abandoned', 'core_control_stop')
-            if agenda is not None:
-                agenda.hold(now)
             detail = dict(detail, noop=False, route='ended')
     except ValueError as exc:
         reason = str(exc)[:160]
@@ -1175,6 +1172,10 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
     if detail.get('noop'):
         log('CORE_CONTROL ' + json.dumps(dict(command=command, noop=True)))
         return dict(row, task_outcome=dict(verdict='unchanged', kind='control_' + command, reason='nothing_to_stop'))
+    if command == 'stop' and agenda is not None:
+        # 0025: every effective stop (drive, task or route) holds the agenda, so it does not pick the
+        # next activity at once (0023 held only routes; a task stop had already cleared the goal).
+        agenda.hold(now)
     if command == 'drive':
         if game_tasks is not None and intent.get('task') == 'end':
             game_tasks.invalidate()

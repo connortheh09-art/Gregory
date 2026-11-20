@@ -79,18 +79,21 @@ CONTROL_TURNS=('turn_left','turn_right','turn_around','slight_left','slight_righ
 def control_hint(control,task=False):
     """Lean L4: plain instructions with one example per common request; stop only when offered.
     0023: examples as a short list with walk not first, plus a back example and a talk-only one
-    (live 0022: chat/screen/back requests copied the walk example)."""
+    (live 0022: chat/screen/back requests copied the walk example).
+    0025: stop is the first example when offered, with the owner's real phrasings (replay: stop
+    1/9, null chosen for cancel/stand still); the talk-only line goes last and no longer says
+    'looking' (replay: explicit screen check 3/3 -> 0/3 null)."""
     stop=stoppable(control,task)
-    return ('BODY CONTROL (your own body). Examples: '
-        '- Just talking, answering or looking at something: intent null. '
+    return ('BODY CONTROL (your own body). Examples: '+
+        ('- Stop, stand still, cancel that, or stop what you are doing (ends your task too): {"action":"control","command":"stop"}. ' if stop else '')+
         '- Jump in place: {"action":"control","command":"drive","move":"none","look":"ahead","pace":"walk","jump":"tap","seconds":1}. '
         '- Back up: {"action":"control","command":"drive","move":"back","look":"ahead","pace":"walk","jump":"none","seconds":2}. '
         '- Turn right and run: {"action":"control","command":"drive","move":"forward","look":"turn_right","pace":"run","jump":"none","seconds":3}. '
         '- Walk forward: {"action":"control","command":"drive","move":"forward","look":"ahead","pace":"walk","jump":"none","seconds":3}. '
+        '- Only chatting or answering, with no request to move: intent null. '
         'look: ahead keeps your facing; turn_left|turn_right|turn_around turn once; P#/D# faces that person/place while you move. '
         'pace sneak|walk|jog|run (run when asked to run); crouch/use true press once; fly on|off, vertical up|down while flying. '
         'A new control replaces the last one. '+
-        ('When asked to stop, halt or stay put, stop moving and end your task: {"action":"control","command":"stop"}. ' if stop else '')+
         ('A drive pauses your task until the drive ends. ' if task else '')+
         'control.result is what the game saw last time. ')
 

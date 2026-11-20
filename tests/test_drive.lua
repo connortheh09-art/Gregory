@@ -85,8 +85,10 @@ function lp:GetShootPos() return self.pos + Vector(0, 0, 64) end
 function lp:GetPos() return self.pos end
 function lp:SetEyeAngles(a) self.eye = a end
 
-local function cmd()
-    local c = { keys = {}, fwd = 0, side = 0, up = 0, view = Angle(0, 0, 0) }
+local function cmd(number)
+    -- number 0 = a local-only command the server never receives (high FPS); default is sent.
+    local c = { keys = {}, fwd = 0, side = 0, up = 0, view = Angle(0, 0, 0), number = number or 1 }
+    function c:CommandNumber() return self.number end
     function c:RemoveKey(k) self.keys[k] = nil end
     function c:AddKey(k) self.keys[k] = true end
     function c:ClearMovement() self.fwd, self.side, self.up = 0, 0, 0 end
@@ -152,6 +154,32 @@ do
     drive.receive(hold(2, { jump = 'tap' }), 1, lp)
     c = cmd() drive.step(c, lp, 1.01, .015)
     check(c.keys[IN_JUMP], 'a new generation taps again')
+end
+
+-- 2b. 0024: one-shots are spent only on commands the server receives (live 0022: jump 'done',
+-- no air phase). Local-only commands interleave with sent ones at high FPS.
+do
+    local drive = load()
+    lp.ground = true
+    drive.receive(hold(1, { jump = 'tap', use = true }), 0, lp)
+    local c = cmd(0) drive.step(c, lp, .01, .015)
+    check(not c.keys[IN_JUMP] and not c.keys[IN_USE], 'a local-only command does not spend tap or use')
+    check(drive.telemetry(lp, .01).jump ~= 'done', 'tap still pending after a local-only command')
+    c = cmd(0) drive.step(c, lp, .015, .015)
+    c = cmd(5) drive.step(c, lp, .02, .015)
+    check(c.keys[IN_JUMP] and c.keys[IN_USE], 'the next sent command presses tap and use')
+    check(drive.telemetry(lp, .02).jump == 'done', 'tap done only once sent')
+    c = cmd(6) drive.step(c, lp, .03, .015)
+    check(not c.keys[IN_JUMP] and not c.keys[IN_USE], 'still once per generation')
+    -- Hold re-press: local-only commands neither press nor advance the press/release alternation.
+    drive = load()
+    drive.receive(hold(1, { jump = 'hold' }), 0, lp)
+    local seen = {}
+    for k, n in ipairs({ 0, 1, 0, 0, 2, 0, 3 }) do
+        c = cmd(n) drive.step(c, lp, k * .01, .015)
+        seen[#seen + 1] = c.keys[IN_JUMP] and 'J' or '-'
+    end
+    check(table.concat(seen) == '-J----J', 'hold presses on alternate sent commands only, got ' .. table.concat(seen))
 end
 
 -- 3. A tap that cannot happen within 0.5s is reported missed, not pressed later.
