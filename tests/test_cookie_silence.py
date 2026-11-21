@@ -34,7 +34,9 @@ class ContinuationTests(unittest.TestCase):
         self.n += 1
         meta = dict(self.host.meta, connection=self.scope[0], generation=self.scope[1],
                     request_id='input-'+str(self.n), captured_at=time.time())
+        before = time.monotonic()
         self.assertTrue(self.lane.hear_voice(text, meta))
+        self.assertGreaterEqual(self.lane.last_owner_voice, before)  # 0027 agenda quiet window
         return self.lane.queue.popleft()
 
     def answer(self, request):

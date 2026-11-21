@@ -210,6 +210,7 @@ class SupervisedLane:
         self.dialogue = deque(maxlen=8)
         self.unanswered_voice = deque(maxlen=4)
         self.voice_input_sequence = 0
+        self.last_owner_voice = -float('inf')  # monotonic admission time
         self.lock = threading.Lock()
         with closing(open_reader(recorder.path)) as db:
             self.database_id = read_events(db, limit=1)['database_id']
@@ -430,6 +431,7 @@ class SupervisedLane:
                 (metadata['connection'],metadata['generation']) != self.delivery.stamp()):
             return False
         if not self.hear(text):return False
+        self.last_owner_voice=time.monotonic()
         request=self.queue[-1];request['voice_metadata']=dict(metadata)
         request['delivery_stamp']=(metadata['connection'],metadata['generation'])
         if hasattr(self.delivery, 'authorize_inbox'):
@@ -885,6 +887,9 @@ class CoreGameAuthority:
         self.gate=threading.Condition();self.lock=threading.Lock()
         self.model_active=False;self.foreground_waiters=0
         self.foreground_pending=lambda:False
+        # 0027 voice wins: monotonic time of the last admitted owner voice turn.
+        self.last_owner_voice=lambda:-float('inf')
+        self.voice_quiet_seconds=0
         self.log=lambda message:None
         self.started=time.time();self.world_started=self.started
         self.world=None;self.events=deque(maxlen=8);self.last_action=None;self.last_feedback=None
@@ -897,6 +902,8 @@ class CoreGameAuthority:
             if background:
                 if self.model_active or self.foreground_waiters or self.foreground_pending():
                     raise CoreTurnDeferred('background deferred for foreground')
+                if queued-self.last_owner_voice()<self.voice_quiet_seconds:
+                    raise CoreTurnDeferred('background deferred for conversation')
             else:
                 self.foreground_waiters+=1
                 try:
@@ -906,6 +913,10 @@ class CoreGameAuthority:
         started=time.monotonic();outcome='failed'
         try:
             answer=self.core.call('think',payload,timeout=25)
+            # Voice arrived while this idle call ran: its choice predates the owner's words.
+            if background and self.last_owner_voice()>=queued:
+                outcome='superseded_by_voice'
+                raise CoreTurnDeferred('background superseded by voice')
             outcome='returned';return answer
         finally:
             finished=time.monotonic()

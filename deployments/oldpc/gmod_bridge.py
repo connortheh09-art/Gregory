@@ -1516,6 +1516,7 @@ def main() -> int:
     ap.add_argument("--model-min-tokens", type=int, default=0, help="opt-in minimum output budget, including reasoning")
     ap.add_argument("--model-timeout", type=float, default=8, help="local model request timeout seconds (maximum 120)")
     ap.add_argument("--model-reasoning", choices=("default", "off"), default="default", help="use model default or request reasoning off (LM Studio)")
+    ap.add_argument("--agenda-voice-quiet", type=float, default=60, help="supervised: no autonomous agenda call for this many seconds after an owner voice turn (0-300; 0 = off)")
     ap.add_argument("--recorder", action="store_true", help="opt-in passive SQLite experience recording")
     ap.add_argument("--recorder-db", default="", help="local recorder DB path; requires --recorder")
     ap.add_argument("--recorder-text", choices=("metadata","visible"), default="metadata")
@@ -1604,6 +1605,8 @@ def _run_bridge(a, ap, capture_gate=None):
         configure(a.model_min_tokens, a.model_timeout, a.model_reasoning)
     except ValueError as exc:
         ap.error(str(exc))
+    if not 0 <= getattr(a, 'agenda_voice_quiet', 60) <= 300:
+        ap.error('--agenda-voice-quiet must be 0-300 seconds')
     if getattr(a,'core_direct_control',False) and not (a.supervised_session and a.core_game_tasks):
         ap.error('--core-direct-control requires --supervised-session and --core-game-tasks')
     if getattr(a,'core_harness',False) and not (a.supervised_session and a.core_game_tasks and a.voice_turn_taking):
@@ -1789,6 +1792,8 @@ def _run_bridge(a, ap, capture_gate=None):
                 game_authority.quiet_test_profile=getattr(a,'quiet_test_profile',False)
                 game_authority.dialogue=supervised.recent_dialogue
                 game_authority.foreground_pending=supervised.foreground_pending
+                game_authority.last_owner_voice=lambda:supervised.last_owner_voice
+                game_authority.voice_quiet_seconds=getattr(a,'agenda_voice_quiet',60)
                 game_authority.log=log
                 PLAYERCORE.core_authority=True
                 supervised.game_authority=game_authority

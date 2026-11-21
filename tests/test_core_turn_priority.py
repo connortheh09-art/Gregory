@@ -67,6 +67,30 @@ class PriorityTests(unittest.TestCase):
   self.assertFalse(lane.foreground_pending())
   self.assertEqual(lane._next_request(),dict(kind='import',trace='memory-trace'))
   self.assertIs(lane._next_request(),internal)
+ def test_idle_waits_out_conversation_quiet_window_without_model_call(self):
+  a=CoreGameAuthority(SimpleNamespace(call=lambda *a,**k:self.fail('idle admitted')))
+  heard=[time.monotonic()];a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=60
+  with self.assertRaisesRegex(CoreTurnDeferred,'conversation'):a.think(dict(prompt='idle'),background=True)
+  heard[0]-=61;a.core=SimpleNamespace(call=lambda *a,**k:dict(say='ok'))
+  self.assertEqual(a.think(dict(prompt='idle'),background=True)['say'],'ok')
+  a.voice_quiet_seconds=0;heard[0]=time.monotonic()
+  self.assertEqual(a.think(dict(prompt='idle'),background=True)['say'],'ok')
+ def test_idle_result_finishing_after_voice_admission_is_discarded(self):
+  heard=[-float('inf')];logs=[]
+  def call(op,payload,**kw):
+   heard[0]=time.monotonic();return dict(say='Exploring.')
+  a=CoreGameAuthority(SimpleNamespace(call=call));a.log=logs.append
+  a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=60
+  with self.assertRaisesRegex(CoreTurnDeferred,'superseded by voice'):a.think(dict(prompt='idle'),background=True)
+  self.assertEqual(json.loads(logs[-1].split(' ',1)[1])['outcome'],'superseded_by_voice')
+  self.assertFalse(a.model_active)
+  # Owner turns are never discarded by their own admission.
+  self.assertEqual(a.think(dict(prompt='voice'))['say'],'Exploring.')
+ def test_refused_voice_does_not_stamp_lane(self):
+  lane=SupervisedLane.__new__(SupervisedLane);lane.last_owner_voice=-float('inf')
+  lane.delivery=None
+  self.assertFalse(lane.hear_voice('stop',{}))
+  self.assertEqual(lane.last_owner_voice,-float('inf'))
  def test_pending_owner_finalizer_still_blocks_idle(self):
   lane=SupervisedLane.__new__(SupervisedLane);lane.queue=deque();lane.imports=deque()
   lane.ready=dict(request=dict(execution_receipt={'id':'receipt'}))
