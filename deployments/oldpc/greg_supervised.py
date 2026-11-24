@@ -51,8 +51,8 @@ class SessionWindow:
 
     @staticmethod
     def admits(draining, kind, text):
-        from greg_voice_protocol import stop_text
-        return not draining or (kind == 'directive' and stop_text(text))
+        from greg_voice_protocol import stop_text, force_command
+        return not draining or (kind == 'directive' and (stop_text(text) or force_command(text) is not None))
 
 
 def drain_pending(worker, lane, policy_future, speech):
@@ -435,6 +435,14 @@ class SupervisedLane:
         self.last_owner_voice=time.monotonic()
         request=self.queue[-1];request['voice_metadata']=dict(metadata)
         request['delivery_stamp']=(metadata['connection'],metadata['generation'])
+        from greg_voice_protocol import force_command
+        forced=force_command(text)
+        if forced:
+            # Owner-only (checked above). Never reaches the model, never becomes a
+            # conversation row, never waits behind an in-flight decision.
+            request['force']=forced
+            self.log('FORCE_REQUEST '+forced)
+            return True
         if hasattr(self.delivery, 'authorize_inbox'):
             claim = self.delivery.authorize_inbox(metadata, text)
             if claim:
@@ -526,6 +534,11 @@ class SupervisedLane:
                     control_epoch=trace.control.control_epoch)
 
     def _work(self, request):
+        if request.get('force'):
+            # Owner-only force phrase: no model call, no dialogue row, no queue wait.
+            # Shape matches Core's control intent so apply_control handles it as a stop/back.
+            return dict(say='', game_intent={'action': 'control', 'command': request['force']},
+                        dispatched=False, force=True)
         if request.get('finalize_row') is not None:return self._finalize_speech(request)
         if request['kind'] == 'import':
             return self._import(request['trace'])

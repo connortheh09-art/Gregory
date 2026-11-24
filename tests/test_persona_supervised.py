@@ -71,7 +71,8 @@ class PersonaTests(unittest.TestCase):
         guide = p.guide()
         for untrue in ("pathfinder", "city map", "flashlight", "Streets and alleys are dark"):
             self.assertNotIn(untrue, guide)
-        self.assertIn("stop, stop", guide)
+        self.assertIn("game rejects an action", guide)
+        self.assertNotIn("If someone tells you to stop, stop", guide)
 
     def test_temperatures_split_by_job(self):
         calls = []
