@@ -33,7 +33,8 @@ def reply_surface(row, voice_configured):
     return 'voice' if voice_configured else 'game'
 
 
-def force_outcome(command, *, authority=None, tasks=None, controller=None, log=lambda s: None, now=None):
+def force_outcome(command, *, authority=None, tasks=None, controller=None, log=lambda s: None,
+                  now=None, hold_seconds=15.0):
     """An owner force phrase: no model, nothing restarts him, and he finds out afterwards.
 
     Deliberately does not call Core 'stop': that is the lifecycle stop (accepting=False,
@@ -55,7 +56,7 @@ def force_outcome(command, *, authority=None, tasks=None, controller=None, log=l
             target = holder
         if target is not None and hasattr(target, 'hold'):
             try:
-                target.hold(moment, 60)
+                target.hold(moment, hold_seconds)
             except Exception as exc:  # never let bookkeeping block the stop
                 log('FORCE_AGENDA_HOLD_FAILED ' + type(exc).__name__)
     if authority is not None and hasattr(authority, 'events'):
@@ -260,6 +261,9 @@ class SupervisedLane:
         self.unanswered_voice = deque(maxlen=4)
         self.voice_input_sequence = 0
         self.last_owner_voice = -float('inf')  # monotonic admission time
+        # 0027's voice-quiet window is what actually keeps the agenda quiet after a turn;
+        # a force command must not touch it, or its own shorter hold is dead code.
+        self.force_hold_seconds = 15.0
         self.lock = threading.Lock()
         with closing(open_reader(recorder.path)) as db:
             self.database_id = read_events(db, limit=1)['database_id']
@@ -481,17 +485,18 @@ class SupervisedLane:
                 (metadata['connection'],metadata['generation']) != self.delivery.stamp()):
             return False
         if not self.hear(text):return False
-        self.last_owner_voice=time.monotonic()
         request=self.queue[-1];request['voice_metadata']=dict(metadata)
         request['delivery_stamp']=(metadata['connection'],metadata['generation'])
         from greg_voice_protocol import force_command
         forced=force_command(text)
         if forced:
             # Owner-only (checked above). Never reaches the model, never becomes a
-            # conversation row, never waits behind an in-flight decision.
+            # conversation row, never waits behind an in-flight decision, and never
+            # counts as a conversation turn for the 0027 agenda-voice-quiet timer.
             request['force']=forced
             self.log('FORCE_REQUEST '+forced)
             return True
+        self.last_owner_voice=time.monotonic()
         if hasattr(self.delivery, 'authorize_inbox'):
             claim = self.delivery.authorize_inbox(metadata, text)
             if claim:
@@ -590,7 +595,7 @@ class SupervisedLane:
             self.ready = None
             return force_outcome(request['force'], authority=self.game_authority,
                                  tasks=self.game_tasks, controller=getattr(self, 'control', None),
-                                 log=self.log)
+                                 log=self.log, hold_seconds=self.force_hold_seconds)
         if request.get('finalize_row') is not None:return self._finalize_speech(request)
         if request['kind'] == 'import':
             return self._import(request['trace'])

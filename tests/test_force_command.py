@@ -6,13 +6,14 @@ owner-only, matches loosely for Whisper, and never reaches the model.
 
 import sys
 import unittest
+from collections import deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "deployments" / "oldpc")]
 
 from greg_voice_protocol import force_action, force_command  # noqa: E402
-from greg_supervised import SessionWindow, force_intent, force_outcome  # noqa: E402
+from greg_supervised import SessionWindow, SupervisedLane, force_intent, force_outcome  # noqa: E402
 from gregory_core import persona as p  # noqa: E402
 
 
@@ -93,9 +94,9 @@ class ForceOutcomeTests(unittest.TestCase):
         row = force_outcome("stop", authority=authority, tasks=tasks, now=100.0)
         self.assertEqual(row["game_intent"], {"action": "control", "command": "stop"})
         self.assertFalse(row["dispatched"])
-        # Nothing restarts him: autonomous picks are held for 60s.
-        self.assertEqual(authority.agenda.holds, [(100.0, 60)])
-        self.assertEqual(tasks.holds, [(100.0, 60)])
+        # Nothing restarts him: autonomous picks are held for the configured 15s.
+        self.assertEqual(authority.agenda.holds, [(100.0, 15.0)])
+        self.assertEqual(tasks.holds, [(100.0, 15.0)])
         # He finds out afterwards, as an event he can complain about next turn.
         self.assertEqual(authority.events[-1]["kind"], "force_stop")
         self.assertEqual(authority.events[-1]["command"], "stop")
@@ -123,6 +124,56 @@ class ForceOutcomeTests(unittest.TestCase):
     def test_missing_hooks_do_not_block_the_stop(self):
         row = force_outcome("back", authority=object(), tasks=None, now=1.0)
         self.assertEqual(row["game_intent"]["move"], "back")
+
+
+class FakeDelivery:
+    config = {'owner_id': 'owner', 'guild_id': 'g', 'channel_id': 'c'}
+
+    def stamp(self):
+        return ('conn', 1)
+
+
+def fake_lane():
+    lane = SupervisedLane.__new__(SupervisedLane)
+    lane.delivery = FakeDelivery()
+    lane.queue = deque(maxlen=4)
+    lane.log = lambda message: None
+    lane.last_owner_voice = -float('inf')
+    lane.generation = 0
+    lane.force_hold_seconds = 15.0
+
+    def hear(text):
+        lane.queue.append(dict(kind='chat', text=text, generation=lane.generation))
+        return True
+
+    lane.hear = hear
+    return lane
+
+
+def voice_meta(**overrides):
+    meta = dict(author_id='owner', guild_id='g', channel_id='c', connection='conn',
+                generation=1, request_id='r1', captured_at=0)
+    meta.update(overrides)
+    return meta
+
+
+class ForceAdmissionTests(unittest.TestCase):
+    def test_force_is_tagged_for_the_model_free_path(self):
+        lane = fake_lane()
+        self.assertTrue(lane.hear_voice('Gregory force stop', voice_meta()))
+        self.assertEqual(lane.queue[-1]['force'], 'stop')
+
+    def test_force_does_not_start_the_voice_quiet_clock(self):
+        # 0027 quietens the agenda for --agenda-voice-quiet after an owner turn.
+        # A force command has its own shorter hold, so it must not touch that timer.
+        lane = fake_lane()
+        self.assertTrue(lane.hear_voice('Gregory force stop', voice_meta()))
+        self.assertEqual(lane.last_owner_voice, -float('inf'))
+
+    def test_force_is_owner_only(self):
+        lane = fake_lane()
+        self.assertFalse(lane.hear_voice('Gregory force stop', voice_meta(author_id='someone-else')))
+        self.assertEqual(len(lane.queue), 0)
 
 
 if __name__ == "__main__":

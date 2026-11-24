@@ -1516,7 +1516,8 @@ def main() -> int:
     ap.add_argument("--model-min-tokens", type=int, default=0, help="opt-in minimum output budget, including reasoning")
     ap.add_argument("--model-timeout", type=float, default=8, help="local model request timeout seconds (maximum 120)")
     ap.add_argument("--model-reasoning", choices=("default", "off"), default="default", help="use model default or request reasoning off (LM Studio)")
-    ap.add_argument("--agenda-voice-quiet", type=float, default=60, help="supervised: no autonomous agenda call for this many seconds after an owner voice turn (0-300; 0 = off)")
+    ap.add_argument("--agenda-voice-quiet", type=float, default=30, help="supervised: no autonomous agenda call for this many seconds after an owner voice turn (0-300; 0 = off)")
+    ap.add_argument("--force-hold", type=float, default=15, help="supervised: after an owner force stop/back, no autonomous agenda pick for this many seconds (0-300; independent of --agenda-voice-quiet)")
     ap.add_argument("--recorder", action="store_true", help="opt-in passive SQLite experience recording")
     ap.add_argument("--recorder-db", default="", help="local recorder DB path; requires --recorder")
     ap.add_argument("--recorder-text", choices=("metadata","visible"), default="metadata")
@@ -1607,6 +1608,8 @@ def _run_bridge(a, ap, capture_gate=None):
         ap.error(str(exc))
     if not 0 <= getattr(a, 'agenda_voice_quiet', 60) <= 300:
         ap.error('--agenda-voice-quiet must be 0-300 seconds')
+    if not 0 <= getattr(a, 'force_hold', 15) <= 300:
+        ap.error('--force-hold must be 0-300 seconds')
     if getattr(a,'core_direct_control',False) and not (a.supervised_session and a.core_game_tasks):
         ap.error('--core-direct-control requires --supervised-session and --core-game-tasks')
     if getattr(a,'core_harness',False) and not (a.supervised_session and a.core_game_tasks and a.voice_turn_taking):
@@ -1786,6 +1789,7 @@ def _run_bridge(a, ap, capture_gate=None):
             supervised = SupervisedLane(core, recorder, tracker, log=log, delivery=voice_session,
                 vision_available=bool(game_screen or (a.vision_helper and a.vision_python)),game_tasks=game_tasks,
                 screen_source=game_screen.buffer if game_screen else None,turn_taking=getattr(a,'voice_turn_taking',False),harness=getattr(a,'core_harness',False))
+            supervised.force_hold_seconds=getattr(a,'force_hold',15.0)
             if a.supervised_session:
                 from greg_supervised import CoreGameAuthority
                 game_authority=CoreGameAuthority(core,game_screen.buffer if game_screen else None)
@@ -1793,7 +1797,7 @@ def _run_bridge(a, ap, capture_gate=None):
                 game_authority.dialogue=supervised.recent_dialogue
                 game_authority.foreground_pending=supervised.foreground_pending
                 game_authority.last_owner_voice=lambda:supervised.last_owner_voice
-                game_authority.voice_quiet_seconds=getattr(a,'agenda_voice_quiet',60)
+                game_authority.voice_quiet_seconds=getattr(a,'agenda_voice_quiet',30)
                 game_authority.log=log
                 PLAYERCORE.core_authority=True
                 supervised.game_authority=game_authority
