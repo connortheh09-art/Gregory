@@ -31,6 +31,9 @@ _FUSED_BACK = re.compile(r'^(?:4orce|force|forced|forceful)(?:back|backup|backwa
 _STOP_HEAD = {'stop', 'halt', 'freeze'}
 _STOP_PAIR = {'stop moving', 'stand still', 'stay still'}
 _BACK_HEAD = {'back', 'backward', 'backwards', 'backup', 'reverse'}
+# Words that may precede the command without making it a different sentence.
+_LEAD_IN = {'okay', 'ok', 'uh', 'um', 'uhh', 'hey', 'greg', 'gregory', 'gregorys', 's',
+            'so', 'yeah', 'well', 'right', 'alright'}
 
 
 def force_command(text):
@@ -40,19 +43,26 @@ def force_command(text):
     value = ' '.join(re.sub(r'[^a-z0-9]+', ' ', text.casefold()).split())
     value = re.sub(r'^gregory\s+', '', value)
     words = value.split()
+    # A short lead-in ('okay Gregory, force stop') is still the same command.
+    for _ in range(3):
+        if words and words[0] in _LEAD_IN:
+            words = words[1:]
+        else:
+            break
     if not words:
         return None
     head = words[0]
-    # Whisper fuses the two words into one: 'forstop', 'forcestop'.
-    if _FUSED_STOP.match(head):
-        return 'stop'
-    if _FUSED_BACK.match(head):
-        return 'back'
-    if head not in _FORCE:
-        return None
     rest = words[1:]
     while rest and rest[-1] in _FILLER:
         rest.pop()
+    # Whisper fuses the two words into one: 'forstop', 'forcestop'.
+    # Stop tolerates trailing commentary; back must be the whole command.
+    if _FUSED_STOP.match(head):
+        return 'stop'
+    if _FUSED_BACK.match(head) and not rest:
+        return 'back'
+    if head not in _FORCE:
+        return None
     if not rest:
         return None
     # Stop tolerates trailing commentary; that is the 'Forstop and then...' miss.

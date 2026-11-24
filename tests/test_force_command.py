@@ -40,6 +40,21 @@ class ForcePhraseTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(force_command(text), "stop")
 
+    def test_lead_in_words_still_land(self):
+        # Live speech rarely starts with the command itself.
+        for text in ("Okay Gregory, force stop", "uh force stop", "Greg, force stop",
+                     "Gregory's force stop", "hey gregory force stop now"):
+            with self.subTest(text=text):
+                self.assertEqual(force_command(text), "stop")
+
+    def test_fused_back_must_be_the_whole_command(self):
+        # Grady's catch: the fused form was ignoring everything after it.
+        for text in ("forcebackup the files", "forceback and then walk forward"):
+            with self.subTest(text=text):
+                self.assertIsNone(force_command(text))
+        self.assertEqual(force_command("forceback"), "back")
+        self.assertEqual(force_command("forceback now"), "back")
+
     def test_force_back_stays_strict(self):
         for text in ("force back", "force backwards please", "force back up now"):
             with self.subTest(text=text):
