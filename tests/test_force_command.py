@@ -46,6 +46,10 @@ class ForcePhraseTests(unittest.TestCase):
                      "Gregory's force stop", "hey gregory force stop now"):
             with self.subTest(text=text):
                 self.assertEqual(force_command(text), "stop")
+        # The lead-in is stripped for back too: 'okay' does not change what the command means.
+        for text in ("Okay Gregory, force back", "uh force backwards", "well force back up"):
+            with self.subTest(text=text):
+                self.assertEqual(force_command(text), "back")
 
     def test_fused_back_must_be_the_whole_command(self):
         # Grady's catch: the fused form was ignoring everything after it.

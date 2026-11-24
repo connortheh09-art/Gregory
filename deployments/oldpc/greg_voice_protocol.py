@@ -32,6 +32,8 @@ _STOP_HEAD = {'stop', 'halt', 'freeze'}
 _STOP_PAIR = {'stop moving', 'stand still', 'stay still'}
 _BACK_HEAD = {'back', 'backward', 'backwards', 'backup', 'reverse'}
 # Words that may precede the command without making it a different sentence.
+# Stripped for both stop and back: a leading 'okay' or 'uh' does not change what the
+# command means. For back, only trailing words are treated as meaning-changing.
 _LEAD_IN = {'okay', 'ok', 'uh', 'um', 'uhh', 'hey', 'greg', 'gregory', 'gregorys', 's',
             'so', 'yeah', 'well', 'right', 'alright'}
 
@@ -43,7 +45,8 @@ def force_command(text):
     value = ' '.join(re.sub(r'[^a-z0-9]+', ' ', text.casefold()).split())
     value = re.sub(r'^gregory\s+', '', value)
     words = value.split()
-    # A short lead-in ('okay Gregory, force stop') is still the same command.
+    # A short lead-in ('okay Gregory, force stop') is still the same command; it does not
+    # change the meaning of either target, so it is stripped for stop and back alike.
     for _ in range(3):
         if words and words[0] in _LEAD_IN:
             words = words[1:]
