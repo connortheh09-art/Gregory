@@ -33,15 +33,20 @@ def reply_surface(row, voice_configured):
     return 'voice' if voice_configured else 'game'
 
 
-def force_outcome(command, *, authority=None, tasks=None, log=lambda s: None, now=None):
+def force_outcome(command, *, authority=None, tasks=None, controller=None, log=lambda s: None, now=None):
     """An owner force phrase: no model, nothing restarts him, and he finds out afterwards.
 
     Deliberately does not call Core 'stop': that is the lifecycle stop (accepting=False,
-    state='stopping'), i.e. shutdown, not cancel. Stale decisions are dropped by the
-    caller clearing staged work; the agenda is held so no idle pick restarts him.
+    state='stopping'), i.e. shutdown, not cancel. The controller's own stop() is the one
+    that wins over a hold ('invalidate the hold first, then publish the release').
     """
     from greg_voice_protocol import force_action
     moment = time.monotonic() if now is None else now
+    if command == 'stop' and controller is not None and hasattr(controller, 'stop'):
+        try:
+            controller.stop('owner_force')
+        except Exception as exc:  # the intent below still goes out
+            log('FORCE_CONTROLLER_STOP_FAILED ' + type(exc).__name__)
     for holder in (authority, tasks):
         if holder is None:
             continue
@@ -59,8 +64,22 @@ def force_outcome(command, *, authority=None, tasks=None, log=lambda s: None, no
         except Exception as exc:
             log('FORCE_EVENT_FAILED ' + type(exc).__name__)
     log('FORCE_STOP ' + str(command))
-    return dict(say='', game_intent={'action': 'control', 'command': command},
-                dispatched=False, force=True, force_action=force_action(command))
+    return dict(say='', game_intent=force_intent(command), dispatched=False, force=True,
+                force_action=force_action(command))
+
+
+def force_intent(command):
+    """The controller intent a force phrase sends.
+
+    'back' is a drive, not a command: gmod_controller.validate() takes forward/right in
+    -1..1 and the control drive takes a whole number of seconds (1..30), so 1.5s is 2.
+    """
+    if command == 'stop':
+        return {'action': 'control', 'command': 'stop'}
+    if command == 'back':
+        return {'action': 'control', 'command': 'drive', 'move': 'back', 'pace': 'walk',
+                'seconds': 2, 'task': 'pause'}
+    return None
 
 
 class SessionWindow:
@@ -566,10 +585,12 @@ class SupervisedLane:
     def _work(self, request):
         if request.get('force'):
             # Owner-only force phrase: no model call, no dialogue row, no queue wait.
-            # Clear staged work so a decision already in flight cannot restart him.
+            # Bump generation so a decision already in flight can no longer move him.
+            self.generation += 1
             self.ready = None
             return force_outcome(request['force'], authority=self.game_authority,
-                                 tasks=self.game_tasks, log=self.log)
+                                 tasks=self.game_tasks, controller=getattr(self, 'control', None),
+                                 log=self.log)
         if request.get('finalize_row') is not None:return self._finalize_speech(request)
         if request['kind'] == 'import':
             return self._import(request['trace'])

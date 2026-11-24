@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "deployments" / "oldpc")]
 
 from greg_voice_protocol import force_action, force_command  # noqa: E402
-from greg_supervised import SessionWindow, force_outcome  # noqa: E402
+from greg_supervised import SessionWindow, force_intent, force_outcome  # noqa: E402
 from gregory_core import persona as p  # noqa: E402
 
 
@@ -79,6 +79,14 @@ class FakeTasks:
         self.holds.append((now, seconds))
 
 
+class FakeController:
+    def __init__(self):
+        self.stops = []
+
+    def stop(self, reason="stop"):
+        self.stops.append(reason)
+
+
 class ForceOutcomeTests(unittest.TestCase):
     def test_holds_agenda_records_event_and_returns_control_intent(self):
         authority, tasks = FakeAuthority(), FakeTasks()
@@ -92,6 +100,20 @@ class ForceOutcomeTests(unittest.TestCase):
         self.assertEqual(authority.events[-1]["kind"], "force_stop")
         self.assertEqual(authority.events[-1]["command"], "stop")
 
+    def test_stop_calls_the_controller_which_owns_the_hold(self):
+        controller = FakeController()
+        force_outcome("stop", controller=controller, now=1.0)
+        self.assertEqual(controller.stops, ["owner_force"])
+
+    def test_back_is_a_drive_not_a_command(self):
+        # gmod_controller.validate() takes forward/right in -1..1; whole seconds 1..30.
+        intent = force_intent("back")
+        self.assertEqual(intent["command"], "drive")
+        self.assertEqual(intent["move"], "back")
+        self.assertEqual((intent["seconds"], intent["task"]), (2, "pause"))
+        row = force_outcome("back", authority=object(), tasks=None, now=1.0)
+        self.assertEqual(row["game_intent"]["move"], "back")
+
     def test_model_cannot_be_involved(self):
         import inspect
         params = inspect.signature(force_outcome).parameters
@@ -100,7 +122,7 @@ class ForceOutcomeTests(unittest.TestCase):
 
     def test_missing_hooks_do_not_block_the_stop(self):
         row = force_outcome("back", authority=object(), tasks=None, now=1.0)
-        self.assertEqual(row["game_intent"]["command"], "back")
+        self.assertEqual(row["game_intent"]["move"], "back")
 
 
 if __name__ == "__main__":
