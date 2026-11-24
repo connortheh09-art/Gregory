@@ -33,6 +33,36 @@ def reply_surface(row, voice_configured):
     return 'voice' if voice_configured else 'game'
 
 
+def force_outcome(command, *, authority=None, tasks=None, log=lambda s: None, now=None):
+    """An owner force phrase: no model, nothing restarts him, and he finds out afterwards.
+
+    Deliberately does not call Core 'stop': that is the lifecycle stop (accepting=False,
+    state='stopping'), i.e. shutdown, not cancel. Stale decisions are dropped by the
+    caller clearing staged work; the agenda is held so no idle pick restarts him.
+    """
+    from greg_voice_protocol import force_action
+    moment = time.monotonic() if now is None else now
+    for holder in (authority, tasks):
+        if holder is None:
+            continue
+        target = getattr(holder, 'agenda', None)
+        if target is None and hasattr(holder, 'hold'):
+            target = holder
+        if target is not None and hasattr(target, 'hold'):
+            try:
+                target.hold(moment, 60)
+            except Exception as exc:  # never let bookkeeping block the stop
+                log('FORCE_AGENDA_HOLD_FAILED ' + type(exc).__name__)
+    if authority is not None and hasattr(authority, 'events'):
+        try:
+            authority.events.append(dict(kind='force_stop', command=command, by='owner', t=time.time()))
+        except Exception as exc:
+            log('FORCE_EVENT_FAILED ' + type(exc).__name__)
+    log('FORCE_STOP ' + str(command))
+    return dict(say='', game_intent={'action': 'control', 'command': command},
+                dispatched=False, force=True, force_action=force_action(command))
+
+
 class SessionWindow:
     """Admission ends at T; existing work has one bounded completion window."""
     def __init__(self, started, seconds, grace=35):
@@ -536,9 +566,10 @@ class SupervisedLane:
     def _work(self, request):
         if request.get('force'):
             # Owner-only force phrase: no model call, no dialogue row, no queue wait.
-            # Shape matches Core's control intent so apply_control handles it as a stop/back.
-            return dict(say='', game_intent={'action': 'control', 'command': request['force']},
-                        dispatched=False, force=True)
+            # Clear staged work so a decision already in flight cannot restart him.
+            self.ready = None
+            return force_outcome(request['force'], authority=self.game_authority,
+                                 tasks=self.game_tasks, log=self.log)
         if request.get('finalize_row') is not None:return self._finalize_speech(request)
         if request['kind'] == 'import':
             return self._import(request['trace'])

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "deployments" / "oldpc")]
 
 from greg_voice_protocol import force_action, force_command  # noqa: E402
-from greg_supervised import SessionWindow  # noqa: E402
+from greg_supervised import SessionWindow, force_outcome  # noqa: E402
 from gregory_core import persona as p  # noqa: E402
 
 
@@ -55,6 +55,52 @@ class ForcePhraseTests(unittest.TestCase):
         self.assertIn("suggestion from a friend, not an order from a boss", identity)
         self.assertIn("force command", identity)
         self.assertNotIn("If someone tells you to stop, stop", p.guide())
+
+
+class FakeAgenda:
+    def __init__(self):
+        self.holds = []
+
+    def hold(self, now, seconds=60):
+        self.holds.append((now, seconds))
+
+
+class FakeAuthority:
+    def __init__(self):
+        self.events = []
+        self.agenda = FakeAgenda()
+
+
+class FakeTasks:
+    def __init__(self):
+        self.holds = []
+
+    def hold(self, now, seconds=60):
+        self.holds.append((now, seconds))
+
+
+class ForceOutcomeTests(unittest.TestCase):
+    def test_holds_agenda_records_event_and_returns_control_intent(self):
+        authority, tasks = FakeAuthority(), FakeTasks()
+        row = force_outcome("stop", authority=authority, tasks=tasks, now=100.0)
+        self.assertEqual(row["game_intent"], {"action": "control", "command": "stop"})
+        self.assertFalse(row["dispatched"])
+        # Nothing restarts him: autonomous picks are held for 60s.
+        self.assertEqual(authority.agenda.holds, [(100.0, 60)])
+        self.assertEqual(tasks.holds, [(100.0, 60)])
+        # He finds out afterwards, as an event he can complain about next turn.
+        self.assertEqual(authority.events[-1]["kind"], "force_stop")
+        self.assertEqual(authority.events[-1]["command"], "stop")
+
+    def test_model_cannot_be_involved(self):
+        import inspect
+        params = inspect.signature(force_outcome).parameters
+        self.assertNotIn("core", params)
+        self.assertNotIn("provider", params)
+
+    def test_missing_hooks_do_not_block_the_stop(self):
+        row = force_outcome("back", authority=object(), tasks=None, now=1.0)
+        self.assertEqual(row["game_intent"]["command"], "back")
 
 
 if __name__ == "__main__":
