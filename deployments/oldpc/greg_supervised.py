@@ -268,6 +268,8 @@ class SupervisedLane:
         # 0027's voice-quiet window is what actually keeps the agenda quiet after a turn;
         # a force command must not touch it, or its own shorter hold is dead code.
         self.force_hold_seconds = 15.0
+        # A force row is built on the bridge thread and sent before any queued work.
+        self.force_pending = None
         self.lock = threading.Lock()
         with closing(open_reader(recorder.path)) as db:
             self.database_id = read_events(db, limit=1)['database_id']
@@ -488,18 +490,16 @@ class SupervisedLane:
                 metadata['author_id'] != self.delivery.config['owner_id'] or
                 (metadata['connection'],metadata['generation']) != self.delivery.stamp()):
             return False
-        if not self.hear(text):return False
-        request=self.queue[-1];request['voice_metadata']=dict(metadata)
-        request['delivery_stamp']=(metadata['connection'],metadata['generation'])
         from greg_voice_protocol import force_command
         forced=force_command(text)
         if forced:
-            # Owner-only (checked above). Never reaches the model, never becomes a
-            # conversation row, never waits behind an in-flight decision, and never
-            # counts as a conversation turn for the 0027 agenda-voice-quiet timer.
-            request['force']=forced
-            self.log('FORCE_REQUEST '+forced)
-            return True
+            # Owner-only (checked above). Answered here, on the bridge thread: never
+            # queued behind a decision, never in a worker, never a dialogue row, and
+            # never counted as a conversation turn for the 0027 agenda-voice-quiet timer.
+            return self._force(forced, metadata)
+        if not self.hear(text):return False
+        request=self.queue[-1];request['voice_metadata']=dict(metadata)
+        request['delivery_stamp']=(metadata['connection'],metadata['generation'])
         self.last_owner_voice=time.monotonic()
         if hasattr(self.delivery, 'authorize_inbox'):
             claim = self.delivery.authorize_inbox(metadata, text)
@@ -591,15 +591,27 @@ class SupervisedLane:
                     session_id=self.recorder.session_id, bridge_session=trace.control.bridge_session,
                     control_epoch=trace.control.control_epoch)
 
+    def _force(self, command, metadata):
+        """Bridge thread only. A force phrase never enters the queue or the jobs pool.
+
+        Generation is bumped first, so a decision already in flight fails the
+        generation check in poll() and take() and cannot move him afterwards. The
+        controller's stop runs here — 'stop always wins' — not in a worker thread.
+        """
+        if self.force_pending is not None:
+            self.log('FORCE_SUPERSEDED ' + str(self.force_pending.get('force')))
+        self.generation += 1
+        self.ready = None
+        row = force_outcome(command, authority=self.game_authority, tasks=self.game_tasks,
+                            controller=getattr(self, 'control', None), log=self.log,
+                            hold_seconds=getattr(self, 'force_hold_seconds', 15.0))
+        self.force_pending = dict(row, request=dict(kind='force', text='', trace=None,
+            generation=self.generation, voice_metadata=dict(metadata),
+            delivery_stamp=(metadata['connection'], metadata['generation'])))
+        self.log('FORCE_REQUEST ' + command)
+        return True
+
     def _work(self, request):
-        if request.get('force'):
-            # Owner-only force phrase: no model call, no dialogue row, no queue wait.
-            # Bump generation so a decision already in flight can no longer move him.
-            self.generation += 1
-            self.ready = None
-            return force_outcome(request['force'], authority=self.game_authority,
-                                 tasks=self.game_tasks, controller=getattr(self, 'control', None),
-                                 log=self.log, hold_seconds=self.force_hold_seconds)
         if request.get('finalize_row') is not None:return self._finalize_speech(request)
         if request['kind'] == 'import':
             return self._import(request['trace'])
@@ -745,6 +757,10 @@ class SupervisedLane:
 
     def poll(self):
         """Bridge thread only. Completion never writes the mailbox."""
+        pending = getattr(self, 'force_pending', None)
+        if pending is not None:
+            # A force row goes out ahead of anything queued or in flight.
+            self.ready, self.force_pending = pending, None
         if self.future is not None and self.future.done():
             request = self.request
             try:
