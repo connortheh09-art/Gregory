@@ -43,14 +43,29 @@ def envelope(intents,memory_ids=()):
     return obj(dict(intent=dict(anyOf=intents),say=dict(type='string',minLength=1,maxLength=1200),
                     used_memory_ids=dict(type='array',items=item,maxItems=min(3,len(memory_ids)))))
 
-def generate(provider,profile,prompt,*,images=None,response_schema=None):
+def _persona_kwargs(method, purpose, surface, world):
+    """Only pass persona/call-type kwargs to providers that accept them."""
+    import inspect
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return {}
+    if 'purpose' not in params:
+        return {}
+    return dict(purpose=purpose, surface=surface, world=world)
+
+
+def generate(provider,profile,prompt,*,images=None,response_schema=None,purpose=None,surface=None,world=False):
     if response_schema is not None:
         method=getattr(provider,'generate_constrained',None)
         if method is None:raise SchemaViolation('provider lacks constrained decision support')
-        result=method(profile,prompt,images=images,response_schema=response_schema)
+        result=method(profile,prompt,images=images,response_schema=response_schema,
+                      **_persona_kwargs(method,purpose,surface,world))
         validate(result,response_schema)
         return result
-    return provider.generate(profile,prompt,images=images) if images else provider.generate(profile,prompt)
+    method=provider.generate
+    kw=_persona_kwargs(method,purpose,surface,world)
+    return method(profile,prompt,images=images,**kw) if images else method(profile,prompt,**kw)
 
 def without_inspection(schema):
     if schema is None:return None

@@ -38,7 +38,7 @@ class PersonaTests(unittest.TestCase):
     def test_persona_file_loads(self):
         self.assertTrue(p.identity().startswith("You are Gregory."))
         self.assertIn("dry, quick, and genuinely funny", p.identity())
-        self.assertIn("Garry's Mod", p.guide())
+        self.assertIn("state block is exact", p.guide())
 
     def test_no_ai_framing_reaches_a_call(self):
         system = p.speech_system(PROFILE)
@@ -57,6 +57,22 @@ class PersonaTests(unittest.TestCase):
                      "empty life history", "architectural metaphor"):
             self.assertIn(rule, system)
 
+    def test_context_is_explicit_not_assumed(self):
+        bare = p.speech_system(PROFILE)
+        self.assertNotIn("voice call", bare)      # a text surface is never told it is on a call
+        self.assertNotIn("Garry's Mod", bare)     # nor handed a game guide it is not in
+        voice = p.speech_system(PROFILE, surface_name="voice")
+        self.assertIn("voice call", voice)
+        self.assertNotIn("Garry's Mod", voice)
+        game = p.speech_system(PROFILE, surface_name="voice", world=True)
+        self.assertIn("state block is exact", game)
+
+    def test_world_guide_claims_only_what_the_game_reports(self):
+        guide = p.guide()
+        for untrue in ("pathfinder", "city map", "flashlight", "Streets and alleys are dark"):
+            self.assertNotIn(untrue, guide)
+        self.assertIn("stop, stop", guide)
+
     def test_temperatures_split_by_job(self):
         calls = []
 
@@ -68,13 +84,18 @@ class PersonaTests(unittest.TestCase):
             provider = LMStudioProvider("http://127.0.0.1:1234/v1", "google/gemma-4-12b-qat")
             provider.generate(PROFILE, "hi")
             provider.generate(PROFILE, "hi", response_schema={"type": "object"})
+            # Live speech after an action also carries a schema; the marker must win.
+            provider.generate(PROFILE, "hi", response_schema={"type": "object"}, purpose="speech")
+            provider.generate(PROFILE, "hi", response_schema={"type": "object"}, purpose="decision")
         self.assertEqual(calls[0]["temperature"], 0.85)
         self.assertEqual(calls[1]["temperature"], 0.4)
+        self.assertEqual(calls[2]["temperature"], 0.85)
+        self.assertEqual(calls[3]["temperature"], 0.4)
         self.assertTrue(calls[0]["messages"][0]["content"].startswith("You are Gregory."))
 
     def test_lean_actions_need_no_model(self):
-        self.assertEqual(p.lean_action("stop"), {"action": "wait"})
-        self.assertEqual(p.lean_action("Stop now!"), {"action": "wait"})
+        self.assertEqual(p.lean_action("stop"), {"action": "wait", "mode": "stop"})
+        self.assertEqual(p.lean_action("Stop now!"), {"action": "wait", "mode": "stop"})
         self.assertTrue(p.lean_action("jump")["jump"])
 
         walk = p.lean_action("walk forward 3s")
@@ -84,7 +105,11 @@ class PersonaTests(unittest.TestCase):
         run = p.lean_action("run back 2 seconds")
         self.assertEqual((run["dir"], run["sprint"], run["duration"]), ("back", True, 2.0))
 
-    def test_lean_actions_reject_complex(self):
+    def test_lean_actions_refuse_to_guess(self):
+        # 'stay close' means follow, not stop.
+        self.assertIsNone(p.lean_action("stay close"))
+        # A 15s walk must not be quietly cut to the 3s single-command limit.
+        self.assertIsNone(p.lean_action("walk forward 15s"))
         for text in ("", "find a door that opens", "use the blue car", "spawn a barrel"):
             self.assertIsNone(p.lean_action(text), text)
 

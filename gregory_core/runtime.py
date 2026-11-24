@@ -122,19 +122,21 @@ class LMStudioProvider:
         # not to sound like a form being filled in. Same model, two different jobs.
         self.speech_temperature = float(speech_temperature)
 
-    def generate_constrained(self,profile,prompt,*,images=None,response_schema=None):
-        return self.generate(profile,prompt,images=images,response_schema=response_schema)
+    def generate_constrained(self,profile,prompt,*,images=None,response_schema=None,purpose=None,surface=None,world=False):
+        return self.generate(profile,prompt,images=images,response_schema=response_schema,purpose=purpose,surface=surface,world=world)
 
-    def generate(self, profile, prompt, *, images=None, response_schema=None):
+    def generate(self, profile, prompt, *, images=None, response_schema=None, purpose=None, surface=None, world=False):
         from greg_model import post_chat
         from gregory_core.provider_reply import ProviderReplyError
         import re
         from gregory_core.persona import speech_system
         # Keep this request explicit. configure() owns process-wide globals and
         # must not leak a Core provider's budget into other existing callers.
-        warm = self.speech_temperature if response_schema is None else self.temperature
+        warm = (self.speech_temperature if purpose == 'speech' else
+                self.temperature if purpose == 'decision' else
+                self.speech_temperature if response_schema is None else self.temperature)
         body = dict(model=self.model, max_tokens=1024, temperature=warm, reasoning_effort='none', messages=[
-            dict(role='system', content=speech_system(profile)),
+            dict(role='system', content=speech_system(profile, surface_name=surface, world=world)),
             dict(role='user', content=([dict(type='text',text=prompt)]+[
                 dict(type='image_url',image_url=dict(url=value)) for value in images]) if images else prompt)])
         if response_schema is not None:
@@ -646,7 +648,8 @@ class Core:
             task=ModelTask(self.provider,self._profile(),prompt,seconds,images=inbox_images,
                 screen_source=self.screen_source if screen_session is not None else None,
                 screen_session=screen_session,absolute_deadline=p['_model_deadline'],
-                screen_game_tasks=p.get('screen_game_tasks',False),response_schema=response_schema)
+                screen_game_tasks=p.get('screen_game_tasks',False),response_schema=response_schema,
+                purpose=p.get('purpose'),surface=p.get('surface'),world=p.get('world',False))
             task.metadata_only=p.get('metadata_only',False)
             task.private_inbox = inbox_ids is not None
             task.memory_evidence_ids=evidence_ids

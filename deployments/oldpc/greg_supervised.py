@@ -351,7 +351,8 @@ class SupervisedLane:
         # L8: speech-only by construction; constrained output cannot carry an intent (0020 replay: one
         # reply sent intent:"refused" and was dropped).
         from gregory_core.decision_contract import envelope
-        payload=dict(prompt=prompt,metadata_only=True,memory_evidence_ids=ids,response_schema=envelope([dict(type='null')],ids))
+        payload=dict(prompt=prompt,metadata_only=True,memory_evidence_ids=ids,response_schema=envelope([dict(type='null')],ids),
+                     purpose='speech',surface='voice')
         answer=self.game_authority.think(payload) if self.game_authority is not None else self.core.call('think',payload)
         if answer.get('intent') is not None:
             raise RecordingRefused('harness_finalization_is_speech_only')
@@ -573,7 +574,8 @@ class SupervisedLane:
             prompt,ids=bounded_turn_prompt(prefix,request['text'],live,evidence,self.voice_dialogue(request),
                 internal=bool(request.get('game_attention')),task_view=contract.view if contract else task_view,
                 decision_context=decision_context)
-            payload=dict(prompt=prompt,memory_evidence_ids=ids,metadata_only=True,**screen_args)
+            payload=dict(prompt=prompt,memory_evidence_ids=ids,metadata_only=True,
+                         purpose='decision',surface='voice',world=True,**screen_args)
             if contract:
                 decision_schema=contract.schema(decision_context['task_view'],
                     decision_context['live'].get('activity_options',{}),memory_ids=ids,
@@ -1031,7 +1033,8 @@ class CoreGameAuthority:
         intents=activity_intents(compact)
         if args:intents.append(obj(dict(action=enum(['inspect_screen']))))
         schema=envelope(intents)
-        result=self.think(dict(prompt=prompt,metadata_only=True,memory_evidence_ids=[],response_schema=schema,**args),background=True)
+        result=self.think(dict(prompt=prompt,metadata_only=True,memory_evidence_ids=[],response_schema=schema,
+                               purpose='decision',surface='voice',world=True,**args),background=True)
         validate({k:result[k] for k in ('say','intent','used_memory_ids') if k in result},schema)
         proposal=result.get('intent') or {}
         if not isinstance(proposal,dict) or set(proposal)!={'action','choice'} or proposal.get('action')!='game_activity' or not isinstance(proposal.get('choice'),dict):

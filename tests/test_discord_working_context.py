@@ -184,7 +184,9 @@ class WorkingContextTests(unittest.IsolatedAsyncioTestCase):
         with patch('greg_model.post_chat',return_value=Response('{"say":"next step"}')) as post:
             provider.generate(profile,'What should we do next?')
         system=post.call_args.kwargs['json']['messages'][0]['content']
-        self.assertIn(profile['persona'],system)
+        # Persona now comes from persona.md, not the stored one-line stub.
+        self.assertIn('You are Gregory.',system)
+        self.assertNotIn('AI character',system)
         self.assertIn('suggest a next step without a recorded precedent',system)
         self.assertIn('not proof of a past event',system)
         self.assertIn('Do not invent experiences, capabilities or completed actions',system)
