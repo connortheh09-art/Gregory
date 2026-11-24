@@ -20,11 +20,17 @@ def stop_text(text):
 
 
 # Force phrases never reach the model. Loose on purpose: Whisper drops and reshapes words,
-# so 'forced stop', 'force, stop' and 'force stop now' all have to land.
+# so 'forced stop', 'force, stop', 'forstop' and a phrase buried at the start of a longer
+# sentence all have to land. Force back stays strict: a reverse drive is not harmless.
 _FORCE = {'force', 'forced', 'forceful', '4orce'}
 _FILLER = {'now', 'please', 'already', 'immediately', 'it'}
 _FORCE_STOP = {'stop', 'halt', 'freeze', 'stop moving', 'stand still', 'stay still'}
 _FORCE_BACK = {'back', 'backward', 'backwards', 'back up', 'backup', 'reverse'}
+_FUSED_STOP = re.compile(r'^(?:4orce|force|forced|forceful|for)(?:stop|halt|freeze)$')
+_FUSED_BACK = re.compile(r'^(?:4orce|force|forced|forceful)(?:back|backup|backwards?|reverse)$')
+_STOP_HEAD = {'stop', 'halt', 'freeze'}
+_STOP_PAIR = {'stop moving', 'stand still', 'stay still'}
+_BACK_HEAD = {'back', 'backward', 'backwards', 'backup', 'reverse'}
 
 
 def force_command(text):
@@ -33,13 +39,29 @@ def force_command(text):
         return None
     value = ' '.join(re.sub(r'[^a-z0-9]+', ' ', text.casefold()).split())
     value = re.sub(r'^gregory\s+', '', value)
-    words = [w for w in value.split() if w not in _FILLER]
-    if len(words) < 2 or words[0] not in _FORCE:
+    words = value.split()
+    if not words:
         return None
-    target = ' '.join(words[1:])
-    if target in _FORCE_STOP:
+    head = words[0]
+    # Whisper fuses the two words into one: 'forstop', 'forcestop'.
+    if _FUSED_STOP.match(head):
         return 'stop'
-    if target in _FORCE_BACK:
+    if _FUSED_BACK.match(head):
+        return 'back'
+    if head not in _FORCE:
+        return None
+    rest = words[1:]
+    while rest and rest[-1] in _FILLER:
+        rest.pop()
+    if not rest:
+        return None
+    # Stop tolerates trailing commentary; that is the 'Forstop and then...' miss.
+    if rest[0] in _STOP_HEAD or ' '.join(rest[:2]) in _STOP_PAIR:
+        return 'stop'
+    # Back must be the whole command: a two-second reverse drive is not a harmless misfire.
+    if rest[0] in _BACK_HEAD and len(rest) == 1:
+        return 'back'
+    if ' '.join(rest[:2]) in _FORCE_BACK and len(rest) == 2:
         return 'back'
     return None
 

@@ -33,9 +33,24 @@ class ForcePhraseTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(force_command(text), "back")
 
+    def test_fused_and_loose_stop_variants(self):
+        # Whisper's two live misses: a fused token, and the command followed by commentary.
+        for text in ("forstop", "Forstop!", "forcestop", "force-stop", "Force stop because I said so",
+                     "force stop moving now", "force halt, we're done"):
+            with self.subTest(text=text):
+                self.assertEqual(force_command(text), "stop")
+
+    def test_force_back_stays_strict(self):
+        for text in ("force back", "force backwards please", "force back up now"):
+            with self.subTest(text=text):
+                self.assertEqual(force_command(text), "back")
+        for text in ("force it back", "force back, then walk forward", "force backup the files"):
+            with self.subTest(text=text):
+                self.assertIsNone(force_command(text))
+
     def test_plain_requests_are_not_force(self):
         for text in ("stop", "stop now", "wait", "stay close", "don't force it",
-                     "force field", "walk forward 3s", "back up", ""):
+                     "force field", "for stop", "force stopping", "walk forward 3s", "back up", ""):
             with self.subTest(text=text):
                 self.assertIsNone(force_command(text))
 
