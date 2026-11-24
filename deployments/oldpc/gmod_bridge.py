@@ -1814,6 +1814,10 @@ def _run_bridge(a, ap, capture_gate=None):
                 DIRECT_CONTROL = GModControl(DirectController(GModAdapter(actionable=actionable),
                     bridge_publisher(write_cmd, cmd_path, next_seq, lambda: latest, session, chain=lambda: _COMMAND_OBSERVER),
                     run_id=getattr(a,'controller_run',None)), people=game_tasks.people)
+                if 'supervised' in locals() and supervised is not None:
+                    # Force stop must reach the controller that owns the hold, not just
+                    # the intent path: 'stop always wins' lives in DirectController.stop().
+                    supervised.control = DIRECT_CONTROL.controller
                 log('CORE_DIRECT_CONTROL '+json.dumps(dict(run=getattr(a,'controller_run',None))))
             if getattr(a,'supervised_stop_file',''):
                 stop_path=Path(a.supervised_stop_file).absolute()

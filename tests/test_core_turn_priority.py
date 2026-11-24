@@ -69,9 +69,9 @@ class PriorityTests(unittest.TestCase):
   self.assertIs(lane._next_request(),internal)
  def test_idle_waits_out_conversation_quiet_window_without_model_call(self):
   a=CoreGameAuthority(SimpleNamespace(call=lambda *a,**k:self.fail('idle admitted')))
-  heard=[time.monotonic()];a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=60
+  heard=[time.monotonic()];a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=30
   with self.assertRaisesRegex(CoreTurnDeferred,'conversation'):a.think(dict(prompt='idle'),background=True)
-  heard[0]-=61;a.core=SimpleNamespace(call=lambda *a,**k:dict(say='ok'))
+  heard[0]-=31;a.core=SimpleNamespace(call=lambda *a,**k:dict(say='ok'))
   self.assertEqual(a.think(dict(prompt='idle'),background=True)['say'],'ok')
   a.voice_quiet_seconds=0;heard[0]=time.monotonic()
   self.assertEqual(a.think(dict(prompt='idle'),background=True)['say'],'ok')
@@ -80,7 +80,7 @@ class PriorityTests(unittest.TestCase):
   def call(op,payload,**kw):
    heard[0]=time.monotonic();return dict(say='Exploring.')
   a=CoreGameAuthority(SimpleNamespace(call=call));a.log=logs.append
-  a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=60
+  a.last_owner_voice=lambda:heard[0];a.voice_quiet_seconds=30
   with self.assertRaisesRegex(CoreTurnDeferred,'superseded by voice'):a.think(dict(prompt='idle'),background=True)
   self.assertEqual(json.loads(logs[-1].split(' ',1)[1])['outcome'],'superseded_by_voice')
   self.assertFalse(a.model_active)

@@ -43,11 +43,15 @@ def force_outcome(command, *, authority=None, tasks=None, controller=None, log=l
     """
     from greg_voice_protocol import force_action
     moment = time.monotonic() if now is None else now
-    if command == 'stop' and controller is not None and hasattr(controller, 'stop'):
-        try:
-            controller.stop('owner_force')
-        except Exception as exc:  # the intent below still goes out
-            log('FORCE_CONTROLLER_STOP_FAILED ' + type(exc).__name__)
+    if command == 'stop' and controller is not None:
+        stopper = getattr(controller, 'stop', None) or getattr(getattr(controller, 'controller', None), 'stop', None)
+        if stopper is not None:
+            try:
+                stopper('owner_force')
+            except Exception as exc:  # the intent below still goes out
+                log('FORCE_CONTROLLER_STOP_FAILED ' + type(exc).__name__)
+        else:
+            log('FORCE_CONTROLLER_STOP_UNAVAILABLE')
     for holder in (authority, tasks):
         if holder is None:
             continue
