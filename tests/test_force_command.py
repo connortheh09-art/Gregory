@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "deployments" / "oldpc")]
 
 from greg_voice_protocol import force_action, force_command  # noqa: E402
+from gmod_bridge import apply_control  # noqa: E402
 from greg_supervised import SupervisedLane, force_intent, force_outcome  # noqa: E402
 from gregory_core import persona as p  # noqa: E402
 
@@ -208,6 +209,47 @@ class ForceAdmissionTests(unittest.TestCase):
         lane = fake_lane()
         self.assertFalse(lane.hear_voice("Gregory force stop", voice_meta(author_id='someone-else')))
         self.assertIsNone(lane.force_pending)
+
+
+class FakeControl:
+    def __init__(self):
+        self.applied = []
+
+    def apply(self, intent, view, latest):
+        self.applied.append(intent)
+        return dict(generation=1, noop=False)
+
+
+class FakeNotes:
+    def __init__(self):
+        self.notes = []
+
+    def note(self, *args, **kwargs):
+        self.notes.append((args, kwargs))
+
+
+class ForceControlPublicationTests(unittest.TestCase):
+    def force_row(self, **overrides):
+        row = dict(request=dict(voice_metadata={'request_id': 'r1', 'author_id': 'owner'},
+                               delivery_stamp=None),
+                   say='', game_intent=force_intent('back'), force=True)
+        row.update(overrides)
+        return row
+
+    def test_force_back_is_applied_without_an_offer(self):
+        # apply_control refuses non-stop commands unless control was offered; a force
+        # row is the owner's override, so it must not need the offer.
+        control, logs = FakeControl(), []
+        out = apply_control(self.force_row(), {}, control, None, None, FakeNotes(), logs.append, 10.0)
+        self.assertEqual(out['task_outcome']['verdict'], 'accepted')
+        self.assertEqual(out['say'], '')
+        self.assertEqual(control.applied[0]['move'], 'back')
+
+    def test_back_without_force_still_needs_the_offer(self):
+        control, logs = FakeControl(), []
+        out = apply_control(self.force_row(force=False), {}, control, None, None, FakeNotes(), logs.append, 10.0)
+        self.assertEqual(out['task_outcome']['verdict'], 'refused')
+        self.assertIn("can't move like that", out['say'])
 
 
 if __name__ == "__main__":

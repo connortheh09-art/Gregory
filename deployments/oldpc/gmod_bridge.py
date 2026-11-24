@@ -1153,7 +1153,7 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
             raise ValueError('control is offered on owner turns only')
         if control is None:
             raise ValueError('direct control unavailable')
-        if command != 'stop' and not (row.get('activity_options') or {}).get('control'):
+        if command != 'stop' and not row.get('force') and not (row.get('activity_options') or {}).get('control'):
             raise ValueError('control was not offered')
         detail = control.apply(intent, row.get('game_task_view'), latest)
         if command == 'stop' and game_tasks is not None and runtime is not None and game_tasks.end_by_stop(runtime):
@@ -2254,7 +2254,13 @@ def _run_bridge(a, ap, capture_gate=None):
                                     frame_statuses=[x.get('status') for x in row.get('screen_observations',[])][:1])))
                     if getattr(supervised,'harness',False) and game_tasks is not None:
                         game_tasks.update(PLAYERCORE,latest,now)
-                    if not (getattr(supervised,'harness',False) and supervised.defer_speech(row)):
+                    if row.get('force'):
+                        # A force row is a body command, not a turn: no speech, no
+                        # playback slot. He hears about it from the event next turn.
+                        log('FORCE_PUBLISHED ' + str((row.get('game_intent') or {}).get('command')))
+                        if run_voice_log is not None:run_voice_log.reply(row,False)
+                        supervised.published(row, False, qualification='force command; not spoken')
+                    elif not (getattr(supervised,'harness',False) and supervised.defer_speech(row)):
                         surface = reply_surface(row, voice_session is not None)
                         if surface == 'voice':
                             published = voice_session.offer(row)
