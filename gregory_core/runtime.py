@@ -103,7 +103,7 @@ class LMStudioProvider:
     name = 'lm-studio'
     fixture = False
 
-    def __init__(self, endpoint, model, *, temperature=.4):
+    def __init__(self, endpoint, model, *, temperature=.4, speech_temperature=.85):
         from urllib.parse import urlsplit
         url = urlsplit(endpoint)
         if url.scheme != 'http' or url.username or url.password or url.query or not model:
@@ -114,8 +114,13 @@ class LMStudioProvider:
         if not (address.is_loopback or address.is_private or address in ipaddress.ip_network('100.64.0.0/10')):
             raise ValueError('local/private model endpoint required')
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2:
+            raise ValueError('decision temperature must be finite from 0 to 2')
+        if isinstance(speech_temperature, bool) or not isinstance(speech_temperature, (int, float)) or not 0 <= speech_temperature <= 2:
             raise ValueError('speech temperature must be finite from 0 to 2')
         self.endpoint, self.model, self.temperature = endpoint, model, float(temperature)
+        # Structured decisions stay cold enough to be reliable; speech runs warm enough
+        # not to sound like a form being filled in. Same model, two different jobs.
+        self.speech_temperature = float(speech_temperature)
 
     def generate_constrained(self,profile,prompt,*,images=None,response_schema=None):
         return self.generate(profile,prompt,images=images,response_schema=response_schema)
@@ -124,21 +129,12 @@ class LMStudioProvider:
         from greg_model import post_chat
         from gregory_core.provider_reply import ProviderReplyError
         import re
+        from gregory_core.persona import speech_system
         # Keep this request explicit. configure() owns process-wide globals and
         # must not leak a Core provider's budget into other existing callers.
-        body = dict(model=self.model, max_tokens=1024, temperature=self.temperature, reasoning_effort='none', messages=[
-            dict(role='system', content=(profile['persona'] + ' You are Gregory, an AI character. '
-                'Respond to the present conversation in first person. You may be curious, express a tentative '
-                'preference, or suggest a next step without a recorded precedent. Recent dialogue is conversational '
-                'context. Match tone and length to the exchange; casual chat can be brief, playful or straightforward. '
-                'Avoid repeating stock phrases or turning every topic into an architectural metaphor. Recent dialogue is '
-                'not proof of a past event. Retrieved episodic memories support historical claims, not '
-                'current observation or your whole identity. Do not invent experiences, capabilities or completed '
-                'actions. Never infer an empty life history from a retrieval miss. '
-                'Conversational memory writes are unavailable: do not imply a lasting save or trait update succeeded. '
-                'Return JSON with optional intent, say, and used_memory_ids: only IDs from supplied historical '
-                'evidence that your answer actually uses, or an empty list. '
-                'A proposed intent is not execution. Goals: ' + json.dumps(profile['goals']))),
+        warm = self.speech_temperature if response_schema is None else self.temperature
+        body = dict(model=self.model, max_tokens=1024, temperature=warm, reasoning_effort='none', messages=[
+            dict(role='system', content=speech_system(profile)),
             dict(role='user', content=([dict(type='text',text=prompt)]+[
                 dict(type='image_url',image_url=dict(url=value)) for value in images]) if images else prompt)])
         if response_schema is not None:
