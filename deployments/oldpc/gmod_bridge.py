@@ -1172,9 +1172,10 @@ def apply_control(row: dict, latest: dict, control, game_tasks, runtime, authori
     if detail.get('noop'):
         log('CORE_CONTROL ' + json.dumps(dict(command=command, noop=True)))
         return dict(row, task_outcome=dict(verdict='unchanged', kind='control_' + command, reason='nothing_to_stop'))
-    if command == 'stop' and agenda is not None:
+    if command == 'stop' and agenda is not None and not row.get('force'):
         # 0025: every effective stop (drive, task or route) holds the agenda, so it does not pick the
         # next activity at once (0023 held only routes; a task stop had already cleared the goal).
+        # A force row already set its own shorter hold in force_outcome(); 60s would override it.
         agenda.hold(now)
     if command == 'drive':
         if game_tasks is not None and intent.get('task') == 'end':

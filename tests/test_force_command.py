@@ -252,5 +252,17 @@ class ForceControlPublicationTests(unittest.TestCase):
         self.assertIn("can't move like that", out['say'])
 
 
+    def test_force_stop_does_not_get_the_60s_0025_hold(self):
+        # force_outcome already held 15s; apply_control's default hold would override it.
+        agenda = FakeAgenda()
+        control, logs = FakeControl(), []
+        row = dict(request=dict(voice_metadata={'request_id': 'r1', 'author_id': 'owner'},
+                                delivery_stamp=None),
+                   say='', game_intent={'action': 'control', 'command': 'stop'}, force=True)
+        out = apply_control(row, {}, control, None, None, FakeNotes(), logs.append, 10.0, agenda)
+        self.assertEqual(out['task_outcome']['verdict'], 'accepted')
+        self.assertEqual(agenda.holds, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
